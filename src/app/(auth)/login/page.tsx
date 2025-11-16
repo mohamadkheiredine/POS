@@ -1,7 +1,9 @@
 "use client";
 
+import axios from "axios";
 import Image from "next/image";
-import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import React, { use, useEffect, useState } from "react";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -9,15 +11,60 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const router = useRouter();
+
+
+      useEffect(() => {
+      const user_id = localStorage.getItem("user_id");
+      if(user_id != undefined)
+      {
+        router.push("/pos");
+      }
+    }, []);  
+
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
       setError("Oops! Both fields are required.");
       return;
     }
     setError("");
-    // TODO: call your auth API
-    console.log({ username, password });
+     
+    try {
+      const response =  await axios.post(process.env.NEXT_PUBLIC_API_LINK + "request/api/login",{
+      "user_name" : username,
+      "password" : password,
+      "ua_remember" : false
+    });
+
+    const data = response.data;
+        
+    // save data in local storage
+    localStorage.setItem('user_id',data.user_id);
+    localStorage.setItem('user_profile_url',data.user_profile_url);
+    localStorage.setItem('user_fullname',data.user_fullname);
+    localStorage.setItem('user_email',data.user_email);
+    localStorage.setItem('user_name',data.user_name);
+    localStorage.setItem('company_currency',data.company_currency);
+    localStorage.setItem('currency_symbol',data.currency_symbol);
+    localStorage.setItem('sec_company_currency',data.sec_currency_id);
+    localStorage.setItem('sec_currency_symbol',data.sec_currency_symbol);
+    localStorage.setItem('warehouse_id', data.warehouse_id);
+    localStorage.setItem('exchange_rate',data.exchange_rate);
+    localStorage.setItem('g_hash', data.g_hash);
+
+    router.push("/pos");
+    console.log("Login with", { username, password });
+    }
+    catch (error) {
+      console.log("Login error", error);
+      alert("Login failed. Please check your credentials.");
+    
+    }
+
+
+
   };
 
   return (

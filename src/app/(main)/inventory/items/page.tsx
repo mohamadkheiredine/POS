@@ -6,6 +6,7 @@ import {
   MapPin, Factory, AlertTriangle, CalendarClock, ClipboardList, QrCode,
   ChevronLeft, ChevronRight, MoveRight, Layers, Barcode, Edit3, RefreshCw, CheckCircle2, X, ClipboardCheck
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Types
@@ -174,7 +175,7 @@ export default function InventoryItemsPage() {
   const [drawer, setDrawer] = useState<{ open: boolean; item?: InventoryItem | null }>({ open: false, item: null });
   const [move, setMove] = useState<{ open: boolean; item?: InventoryItem | null; lotId?: string }>({ open: false });
   const [count, setCount] = useState<{ open: boolean; item?: InventoryItem | null }>({ open: false });
-
+  const router = useRouter();
   const pageSize = 8;
 
   const filtered = useMemo(() => {
@@ -349,7 +350,7 @@ export default function InventoryItemsPage() {
           {/* Quick actions */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => alert("New purchase order placeholder")}
+              onClick={() => router.push("/purchase-orders/new")}
               className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50"
             >
               <Factory className="h-4 w-4" /> New PO
