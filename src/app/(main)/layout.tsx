@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -47,6 +47,17 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     settings: false,
     admin: false,
   });
+
+    const [UsrFullname, setUsrFullname] = useState<string>("");
+    const [UsrProfileUrl, setUsrProfileUrl] = useState<string>("");
+
+  useEffect(() => {
+    const storedName = localStorage.getItem("user_fullname");
+    const ProfileUrl = localStorage.getItem("user_profile_url");
+    console.log('ProfileUrl',ProfileUrl)
+    if (storedName) setUsrFullname(storedName);
+    if (ProfileUrl) setUsrProfileUrl(ProfileUrl);
+  }, [UsrProfileUrl, UsrFullname]);
 
   const toggleSection = (key: string) =>
     setOpenSections((p) => ({ ...p, [key]: !p[key] }));
@@ -239,15 +250,20 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 onClick={() => setProfileMenu((s) => !s)}
                 className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-gray-100"
               >
+                {/* {
+                 UsrProfileUrl ?
                 <Image
-                  src="/images/profile.jpg"
+                  src={UsrProfileUrl}
                   alt="Profile"
                   width={32}
                   height={32}
                   className="h-8 w-8 rounded-full object-cover"
                 />
+                :
+                ""
+                } */}
                 <span className="hidden text-sm font-medium md:block">
-                  John Doe
+                  {UsrFullname}
                 </span>
               </button>
 
