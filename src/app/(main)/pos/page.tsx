@@ -1,11 +1,28 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Search, X, Plus, Minus, ChefHat, UtensilsCrossed, Send, Trash2, Edit3, Settings2,
-  Receipt, Printer, SquarePen, Square, SquareCheck, ChevronLeft, ChevronRight
+  Search,
+  X,
+  Plus,
+  Minus,
+  ChefHat,
+  UtensilsCrossed,
+  Send,
+  Trash2,
+  Edit3,
+  Settings2,
+  Receipt,
+  Printer,
+  SquarePen,
+  Square,
+  SquareCheck,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
-import '../../../components/theme/pages/pos.scss'
+import "../../../components/theme/pages/pos.scss";
+import axios from "axios";
+
 /* =============================================================================
  * Types
  * ========================================================================== */
@@ -59,16 +76,15 @@ type OrderItem = {
 };
 
 type Table = {
-  id: UID;
-  name: string;
-  seats: number;
-  status: "free" | "occupied" | "reserved" | "dirty";
-  currentOrderId?: UID;
+  id: number;
+  label: string;
+  numberSeats: number;
+  statusId: number;
 };
 
 type Order = {
   id: UID;
-  tableId?: UID;
+  tableId?: number;
   guests?: number;
   items: OrderItem[];
   createdAt: number;
@@ -78,7 +94,13 @@ type Order = {
 /* =============================================================================
  * Mock Data
  * ========================================================================== */
-const KITCHEN_STATIONS: KitchenStation[] = ["Grill", "Salad", "Bar", "Dessert", "Expo"];
+const KITCHEN_STATIONS: KitchenStation[] = [
+  "Grill",
+  "Salad",
+  "Bar",
+  "Dessert",
+  "Expo",
+];
 
 const MODIFIERS: Record<string, ModifierGroup[]> = {
   // by MenuItem.id
@@ -203,22 +225,21 @@ const MENU: MenuItem[] = [
   },
 ];
 
-const TABLES: Table[] = Array.from({ length: 18 }).map((_, i) => ({
-  id: `T${i + 1}`,
-  name: `T${i + 1}`,
-  seats: 4,
-  status: i % 5 === 0 ? "reserved" : "free",
-}));
-
 /* =============================================================================
  * Helpers
  * ========================================================================== */
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 const money = (n: number, d = 2) =>
-  Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  Number(n || 0).toLocaleString(undefined, {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  });
 
-function priceFromModifiers(groups: ModifierGroup[] | undefined, selected: AppliedModifier[]): number {
+function priceFromModifiers(
+  groups: ModifierGroup[] | undefined,
+  selected: AppliedModifier[]
+): number {
   if (!groups?.length || !selected.length) return 0;
   let extra = 0;
   for (const sel of selected) {
@@ -229,7 +250,10 @@ function priceFromModifiers(groups: ModifierGroup[] | undefined, selected: Appli
   return extra;
 }
 
-function validateRequiredGroups(groups: ModifierGroup[] | undefined, selected: AppliedModifier[]) {
+function validateRequiredGroups(
+  groups: ModifierGroup[] | undefined,
+  selected: AppliedModifier[]
+) {
   const issues: string[] = [];
   if (!groups) return issues;
   for (const g of groups) {
@@ -255,9 +279,39 @@ export default function POSPage() {
     []
   );
 
+  useEffect(() => {
+    const fetchTables = async () => {
+      try {
+        const response = await axios.get(
+          process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlisttables",
+          {
+            params: {
+              g_hash: localStorage.getItem("g_hash"),
+              user_id: localStorage.getItem("user_id"),
+            }
+          }
+        );
+
+        const data = response.data.lst_tables;
+        setTables(
+          data.map((t: any) => ({
+            id: t.ft_id,
+            label: t.ft_label,
+            numberSeats: t.ft_number_seats,
+            statusId: t.ft_status_id ?? 0,
+          }))
+        );
+      } catch (e) {
+        console.error("Tables fetch error:", e);
+      }
+    };
+
+    fetchTables();
+  }, []);
+
   // Tables & order
-  const [tables, setTables] = useState<Table[]>(TABLES);
-  const [currentTableId, setCurrentTableId] = useState<UID | undefined>();
+  const [tables, setTables] = useState<Table[]>([]);
+  const [currentTableId, setCurrentTableId] = useState<number | undefined>();
   const [order, setOrder] = useState<Order>({
     id: uid(),
     tableId: undefined,
@@ -284,7 +338,10 @@ export default function POSPage() {
 
   const subtotal = useMemo(
     () =>
-      order.items.reduce((s, li) => s + (li.basePrice + li.priceExtra) * li.qty, 0),
+      order.items.reduce(
+        (s, li) => s + (li.basePrice + li.priceExtra) * li.qty,
+        0
+      ),
     [order.items]
   );
   const tax = subtotal * 0.11;
@@ -296,7 +353,9 @@ export default function POSPage() {
     setOrder((o) => ({ ...o, tableId: t.id }));
     setTables((ts) =>
       ts.map((x) =>
-        x.id === t.id ? { ...x, status: "occupied", currentOrderId: order.id } : x
+        x.id === t.id
+          ? { ...x, status: "occupied", currentOrderId: order.id }
+          : x
       )
     );
   };
@@ -317,7 +376,9 @@ export default function POSPage() {
 
   const toggleModifier = (group: ModifierGroup, option: ModifierOption) => {
     setModSelected((prev) => {
-      const exists = prev.some((s) => s.groupId === group.id && s.optionId === option.id);
+      const exists = prev.some(
+        (s) => s.groupId === group.id && s.optionId === option.id
+      );
       // single-select for required groups (max=1)
       const max = group.maxSelect ?? (group.type === "required" ? 1 : 0);
       if (group.type === "required" && (max === 1 || !max)) {
@@ -329,14 +390,20 @@ export default function POSPage() {
       }
       // optional group: toggle, respecting maxSelect if set
       if (exists) {
-        return prev.filter((s) => !(s.groupId === group.id && s.optionId === option.id));
+        return prev.filter(
+          (s) => !(s.groupId === group.id && s.optionId === option.id)
+        );
       } else {
         const inGroup = prev.filter((s) => s.groupId === group.id);
         if (max && inGroup.length >= max) {
           // replace oldest in-group selection
           const others = prev.filter((s) => s.groupId !== group.id);
           const keep = inGroup.slice(1);
-          return [...others, ...keep, { groupId: group.id, optionId: option.id }];
+          return [
+            ...others,
+            ...keep,
+            { groupId: group.id, optionId: option.id },
+          ];
         }
         return [...prev, { groupId: group.id, optionId: option.id }];
       }
@@ -383,7 +450,10 @@ export default function POSPage() {
   };
 
   const removeLine = (uidLine: UID) =>
-    setOrder((o) => ({ ...o, items: o.items.filter((x) => x.uid !== uidLine) }));
+    setOrder((o) => ({
+      ...o,
+      items: o.items.filter((x) => x.uid !== uidLine),
+    }));
 
   const sendToKitchen = () => {
     setOrder((o) => ({
@@ -417,9 +487,9 @@ export default function POSPage() {
             {tables.map((t) => {
               const active = currentTableId === t.id;
               const color =
-                t.status === "reserved"
+                t.statusId === 1
                   ? "border-amber-300 bg-amber-50"
-                  : t.status === "occupied"
+                  : t.statusId === 2
                   ? "border-emerald-300 bg-emerald-50"
                   : "border-gray-200 bg-white";
               return (
@@ -429,14 +499,16 @@ export default function POSPage() {
                   className={`h-24 rounded-2xl border ${color} p-3 text-left transition hover:bg-orange-50`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{t.name}</span>
+                    <span className="text-sm font-semibold">{t.label}</span>
                     {active ? (
                       <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
                         ACTIVE
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-4 text-xs text-gray-600">{t.seats} seats</div>
+                  <div className="mt-4 text-xs text-gray-600">
+                    {t.numberSeats} seats
+                  </div>
                 </button>
               );
             })}
@@ -494,7 +566,9 @@ export default function POSPage() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-extrabold text-gray-900">$ {money(m.price)}</span>
+                  <span className="font-extrabold text-gray-900">
+                    $ {money(m.price)}
+                  </span>
                   <span className="inline-flex items-center gap-1 text-xs text-gray-500">
                     <ChefHat className="h-3.5 w-3.5" /> {m.kitchenRoute}
                   </span>
@@ -565,9 +639,15 @@ export default function POSPage() {
                             <div className="mt-1 text-xs text-gray-600">
                               {li.modifiers
                                 .map((m) => {
-                                  const it = MENU.find((x) => x.id === li.itemId);
-                                  const g = it?.modifierGroups?.find((gg) => gg.id === m.groupId);
-                                  const o = g?.options.find((oo) => oo.id === m.optionId);
+                                  const it = MENU.find(
+                                    (x) => x.id === li.itemId
+                                  );
+                                  const g = it?.modifierGroups?.find(
+                                    (gg) => gg.id === m.groupId
+                                  );
+                                  const o = g?.options.find(
+                                    (oo) => oo.id === m.optionId
+                                  );
                                   return o?.name;
                                 })
                                 .filter(Boolean)
@@ -605,7 +685,9 @@ export default function POSPage() {
                                 setOrder((o) => ({
                                   ...o,
                                   items: o.items.map((x) =>
-                                    x.uid === li.uid ? { ...x, qty: x.qty + 1 } : x
+                                    x.uid === li.uid
+                                      ? { ...x, qty: x.qty + 1 }
+                                      : x
                                   ),
                                 }))
                               }
@@ -634,7 +716,9 @@ export default function POSPage() {
                           </div>
                           <div className="text-xs text-gray-500">
                             ${money(li.basePrice)} base
-                            {li.priceExtra ? ` + ${money(li.priceExtra)} opts` : ""}
+                            {li.priceExtra
+                              ? ` + ${money(li.priceExtra)} opts`
+                              : ""}
                           </div>
                         </div>
                       </div>
@@ -650,15 +734,21 @@ export default function POSPage() {
             <div className="mb-3 space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-600">Subtotal</span>
-                <span className="font-semibold text-gray-900">$ {money(subtotal)}</span>
+                <span className="font-semibold text-gray-900">
+                  $ {money(subtotal)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Tax (11%)</span>
-                <span className="font-semibold text-gray-900">$ {money(tax)}</span>
+                <span className="font-semibold text-gray-900">
+                  $ {money(tax)}
+                </span>
               </div>
               <div className="flex justify-between text-lg">
                 <span className="font-bold text-gray-800">Total</span>
-                <span className="font-extrabold text-gray-900">$ {money(total)}</span>
+                <span className="font-extrabold text-gray-900">
+                  $ {money(total)}
+                </span>
               </div>
             </div>
 
@@ -700,12 +790,18 @@ export default function POSPage() {
                   const inGroup = modSelected.filter((s) => s.groupId === g.id);
                   const max = g.maxSelect ?? (g.type === "required" ? 1 : 0);
                   return (
-                    <div key={g.id} className="rounded-2xl border border-gray-200 bg-white p-3">
+                    <div
+                      key={g.id}
+                      className="rounded-2xl border border-gray-200 bg-white p-3"
+                    >
                       <div className="mb-2 flex items-center justify-between">
                         <div className="text-sm font-semibold text-gray-900">
                           {g.name}{" "}
                           {g.type === "required" && (
-                            <span className="text-xs font-medium text-amber-700"> (required)</span>
+                            <span className="text-xs font-medium text-amber-700">
+                              {" "}
+                              (required)
+                            </span>
                           )}
                         </div>
                         <div className="text-[11px] text-gray-500">
@@ -714,20 +810,34 @@ export default function POSPage() {
                       </div>
                       <div className="space-y-1">
                         {g.options.map((op) => {
-                          const picked = inGroup.some((s) => s.optionId === op.id);
+                          const picked = inGroup.some(
+                            (s) => s.optionId === op.id
+                          );
                           return (
                             <button
                               key={op.id}
                               className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
-                              ${picked ? "border-orange-300 bg-orange-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                              ${
+                                picked
+                                  ? "border-orange-300 bg-orange-50"
+                                  : "border-gray-200 bg-white hover:bg-gray-50"
+                              }`}
                               onClick={() => toggleModifier(g, op)}
                             >
                               <span className="flex items-center gap-2">
-                                {picked ? <SquareCheck className="h-4 w-4 text-orange-600" /> : <Square className="h-4 w-4 text-gray-400" />}
+                                {picked ? (
+                                  <SquareCheck className="h-4 w-4 text-orange-600" />
+                                ) : (
+                                  <Square className="h-4 w-4 text-gray-400" />
+                                )}
                                 {op.name}
                               </span>
                               <span className="text-gray-700">
-                                {op.priceDelta ? (op.priceDelta > 0 ? `+${money(op.priceDelta)}` : `${money(op.priceDelta)}`) : ""}
+                                {op.priceDelta
+                                  ? op.priceDelta > 0
+                                    ? `+${money(op.priceDelta)}`
+                                    : `${money(op.priceDelta)}`
+                                  : ""}
                               </span>
                             </button>
                           );
@@ -748,7 +858,9 @@ export default function POSPage() {
                   >
                     <Minus className="h-4 w-4" />
                   </button>
-                  <div className="w-10 text-center text-sm font-semibold">{modQty}</div>
+                  <div className="w-10 text-center text-sm font-semibold">
+                    {modQty}
+                  </div>
                   <button
                     className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
                     onClick={() => setModQty((q) => q + 1)}
@@ -757,7 +869,9 @@ export default function POSPage() {
                   </button>
                 </div>
 
-                <div className="mb-2 text-sm text-gray-600">Kitchen Station</div>
+                <div className="mb-2 text-sm text-gray-600">
+                  Kitchen Station
+                </div>
                 <select
                   defaultValue={modItem.kitchenRoute ?? "Expo"}
                   onChange={(e) => {
@@ -775,24 +889,47 @@ export default function POSPage() {
                 <div className="mb-2 text-sm text-gray-600">Chosen</div>
                 <ul className="mb-4 space-y-1 text-sm">
                   {modSelected.map((m) => {
-                    const g = modItem.modifierGroups?.find((gg) => gg.id === m.groupId);
+                    const g = modItem.modifierGroups?.find(
+                      (gg) => gg.id === m.groupId
+                    );
                     const o = g?.options.find((oo) => oo.id === m.optionId);
                     return (
-                      <li key={`${m.groupId}-${m.optionId}`} className="flex items-center justify-between">
-                        <span className="text-gray-700">{g?.name} · <b>{o?.name}</b></span>
+                      <li
+                        key={`${m.groupId}-${m.optionId}`}
+                        className="flex items-center justify-between"
+                      >
                         <span className="text-gray-700">
-                          {o?.priceDelta ? (o.priceDelta > 0 ? `+${money(o.priceDelta)}` : `${money(o.priceDelta)}`) : ""}
+                          {g?.name} · <b>{o?.name}</b>
+                        </span>
+                        <span className="text-gray-700">
+                          {o?.priceDelta
+                            ? o.priceDelta > 0
+                              ? `+${money(o.priceDelta)}`
+                              : `${money(o.priceDelta)}`
+                            : ""}
                         </span>
                       </li>
                     );
                   })}
-                  {modSelected.length === 0 && <li className="text-xs text-gray-500">No modifiers</li>}
+                  {modSelected.length === 0 && (
+                    <li className="text-xs text-gray-500">No modifiers</li>
+                  )}
                 </ul>
 
                 <div className="flex items-center justify-between rounded-xl bg-orange-50 px-3 py-2">
-                  <span className="text-sm font-semibold text-orange-800">Line Total</span>
+                  <span className="text-sm font-semibold text-orange-800">
+                    Line Total
+                  </span>
                   <span className="text-lg font-extrabold text-orange-700">
-                    $ {money((modItem.price + priceFromModifiers(modItem.modifierGroups, modSelected)) * modQty)}
+                    ${" "}
+                    {money(
+                      (modItem.price +
+                        priceFromModifiers(
+                          modItem.modifierGroups,
+                          modSelected
+                        )) *
+                        modQty
+                    )}
                   </span>
                 </div>
 
@@ -842,15 +979,21 @@ export default function POSPage() {
                   <button
                     className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
                     onClick={() =>
-                      setEditLine((l) => (l ? { ...l, qty: Math.max(1, l.qty - 1) } : l))
+                      setEditLine((l) =>
+                        l ? { ...l, qty: Math.max(1, l.qty - 1) } : l
+                      )
                     }
                   >
                     <Minus className="h-4 w-4" />
                   </button>
-                  <span className="w-10 text-center text-sm font-semibold">{editLine.qty}</span>
+                  <span className="w-10 text-center text-sm font-semibold">
+                    {editLine.qty}
+                  </span>
                   <button
                     className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
-                    onClick={() => setEditLine((l) => (l ? { ...l, qty: l.qty + 1 } : l))}
+                    onClick={() =>
+                      setEditLine((l) => (l ? { ...l, qty: l.qty + 1 } : l))
+                    }
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -865,7 +1008,11 @@ export default function POSPage() {
                 <select
                   value={editLine.kitchen}
                   onChange={(e) =>
-                    setEditLine((l) => (l ? { ...l, kitchen: e.target.value as KitchenStation } : l))
+                    setEditLine((l) =>
+                      l
+                        ? { ...l, kitchen: e.target.value as KitchenStation }
+                        : l
+                    )
                   }
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
                 >
@@ -877,10 +1024,16 @@ export default function POSPage() {
 
               {/* Modifiers */}
               <div>
-                <div className="mb-2 text-sm font-semibold text-gray-700">Modifiers</div>
+                <div className="mb-2 text-sm font-semibold text-gray-700">
+                  Modifiers
+                </div>
                 <div className="space-y-3">
-                  {MENU.find((m) => m.id === editLine.itemId)?.modifierGroups?.map((g) => {
-                    const lineInGroup = editLine.modifiers.filter((s) => s.groupId === g.id);
+                  {MENU.find(
+                    (m) => m.id === editLine.itemId
+                  )?.modifierGroups?.map((g) => {
+                    const lineInGroup = editLine.modifiers.filter(
+                      (s) => s.groupId === g.id
+                    );
                     const max = g.maxSelect ?? (g.type === "required" ? 1 : 0);
                     const toggle = (op: ModifierOption) => {
                       setEditLine((l) => {
@@ -889,51 +1042,103 @@ export default function POSPage() {
                           (s) => s.groupId === g.id && s.optionId === op.id
                         );
                         if (g.type === "required" && (max === 1 || !max)) {
-                          const filtered = l.modifiers.filter((s) => s.groupId !== g.id);
+                          const filtered = l.modifiers.filter(
+                            (s) => s.groupId !== g.id
+                          );
                           return exists
                             ? { ...l, modifiers: filtered }
-                            : { ...l, modifiers: [...filtered, { groupId: g.id, optionId: op.id }] };
+                            : {
+                                ...l,
+                                modifiers: [
+                                  ...filtered,
+                                  { groupId: g.id, optionId: op.id },
+                                ],
+                              };
                         }
                         if (exists) {
                           return {
                             ...l,
                             modifiers: l.modifiers.filter(
-                              (s) => !(s.groupId === g.id && s.optionId === op.id)
+                              (s) =>
+                                !(s.groupId === g.id && s.optionId === op.id)
                             ),
                           };
                         } else {
-                          const inG = l.modifiers.filter((s) => s.groupId === g.id);
+                          const inG = l.modifiers.filter(
+                            (s) => s.groupId === g.id
+                          );
                           if (max && inG.length >= max) {
-                            const others = l.modifiers.filter((s) => s.groupId !== g.id);
+                            const others = l.modifiers.filter(
+                              (s) => s.groupId !== g.id
+                            );
                             const keep = inG.slice(1);
-                            return { ...l, modifiers: [...others, ...keep, { groupId: g.id, optionId: op.id }] };
+                            return {
+                              ...l,
+                              modifiers: [
+                                ...others,
+                                ...keep,
+                                { groupId: g.id, optionId: op.id },
+                              ],
+                            };
                           }
-                          return { ...l, modifiers: [...l.modifiers, { groupId: g.id, optionId: op.id }] };
+                          return {
+                            ...l,
+                            modifiers: [
+                              ...l.modifiers,
+                              { groupId: g.id, optionId: op.id },
+                            ],
+                          };
                         }
                       });
                     };
                     return (
-                      <div key={g.id} className="rounded-xl border border-gray-200 p-3">
+                      <div
+                        key={g.id}
+                        className="rounded-xl border border-gray-200 p-3"
+                      >
                         <div className="mb-1 flex items-center justify-between">
-                          <div className="text-sm font-semibold">{g.name} {g.type === "required" && <span className="text-amber-700 text-xs">(required)</span>}</div>
-                          <div className="text-[11px] text-gray-500">{max ? `max ${max}` : "multi"}</div>
+                          <div className="text-sm font-semibold">
+                            {g.name}{" "}
+                            {g.type === "required" && (
+                              <span className="text-amber-700 text-xs">
+                                (required)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {max ? `max ${max}` : "multi"}
+                          </div>
                         </div>
                         <div className="space-y-1">
                           {g.options.map((op) => {
-                            const picked = lineInGroup.some((s) => s.optionId === op.id);
+                            const picked = lineInGroup.some(
+                              (s) => s.optionId === op.id
+                            );
                             return (
                               <button
                                 key={op.id}
                                 className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
-                                ${picked ? "border-orange-300 bg-orange-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                                ${
+                                  picked
+                                    ? "border-orange-300 bg-orange-50"
+                                    : "border-gray-200 bg-white hover:bg-gray-50"
+                                }`}
                                 onClick={() => toggle(op)}
                               >
                                 <span className="flex items-center gap-2">
-                                  {picked ? <SquareCheck className="h-4 w-4 text-orange-600" /> : <Square className="h-4 w-4 text-gray-400" />}
+                                  {picked ? (
+                                    <SquareCheck className="h-4 w-4 text-orange-600" />
+                                  ) : (
+                                    <Square className="h-4 w-4 text-gray-400" />
+                                  )}
                                   {op.name}
                                 </span>
                                 <span className="text-gray-700">
-                                  {op.priceDelta ? (op.priceDelta > 0 ? `+${money(op.priceDelta)}` : `${money(op.priceDelta)}`) : ""}
+                                  {op.priceDelta
+                                    ? op.priceDelta > 0
+                                      ? `+${money(op.priceDelta)}`
+                                      : `${money(op.priceDelta)}`
+                                    : ""}
                                 </span>
                               </button>
                             );
@@ -947,11 +1152,15 @@ export default function POSPage() {
 
               {/* Note */}
               <div>
-                <label className="mb-1 block text-sm font-semibold text-gray-700">Item Note</label>
+                <label className="mb-1 block text-sm font-semibold text-gray-700">
+                  Item Note
+                </label>
                 <textarea
                   rows={3}
                   value={editLine.note ?? ""}
-                  onChange={(e) => setEditLine((l) => (l ? { ...l, note: e.target.value } : l))}
+                  onChange={(e) =>
+                    setEditLine((l) => (l ? { ...l, note: e.target.value } : l))
+                  }
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
                   placeholder="e.g., Well-done, extra sauce…"
                 />
@@ -961,12 +1170,25 @@ export default function POSPage() {
               <div className="flex items-center justify-between rounded-xl bg-orange-50 px-4 py-3">
                 <div className="text-sm">
                   <div className="text-gray-600">Base</div>
-                  <div className="font-semibold">$ {money(editLine.basePrice)}</div>
+                  <div className="font-semibold">
+                    $ {money(editLine.basePrice)}
+                  </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-semibold text-gray-600">Estimated Line Total</div>
+                  <div className="text-sm font-semibold text-gray-600">
+                    Estimated Line Total
+                  </div>
                   <div className="text-lg font-extrabold text-orange-700">
-                    $ {money((editLine.basePrice + priceFromModifiers(MENU.find((m)=>m.id===editLine.itemId)?.modifierGroups, editLine.modifiers)) * editLine.qty)}
+                    ${" "}
+                    {money(
+                      (editLine.basePrice +
+                        priceFromModifiers(
+                          MENU.find((m) => m.id === editLine.itemId)
+                            ?.modifierGroups,
+                          editLine.modifiers
+                        )) *
+                        editLine.qty
+                    )}
                   </div>
                 </div>
               </div>

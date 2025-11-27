@@ -39,7 +39,7 @@ export default function LoginPage() {
     });
 
     const data = response.data;
-        
+    
     // save data in local storage
     localStorage.setItem('user_id',data.user_id);
     localStorage.setItem('user_profile_url',data.user_profile_url);
