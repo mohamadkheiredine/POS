@@ -65,6 +65,7 @@ type AppliedModifier = {
 type OrderItem = {
   uid: UID;
   itemId: UID;
+  tableId?: number;
   name: string;
   basePrice: number;
   qty: number;
@@ -84,7 +85,6 @@ type Table = {
 
 type Order = {
   id: UID;
-  tableId?: number;
   guests?: number;
   items: OrderItem[];
   createdAt: number;
@@ -288,7 +288,7 @@ export default function POSPage() {
             params: {
               g_hash: localStorage.getItem("g_hash"),
               user_id: localStorage.getItem("user_id"),
-            }
+            },
           }
         );
 
@@ -314,8 +314,7 @@ export default function POSPage() {
   const [currentTableId, setCurrentTableId] = useState<number | undefined>();
   const [order, setOrder] = useState<Order>({
     id: uid(),
-    tableId: undefined,
-    guests: 2,
+    guests: 0,
     items: [],
     createdAt: Date.now(),
     status: "open",
@@ -350,14 +349,26 @@ export default function POSPage() {
   /* -------------------- table selection -------------------- */
   const selectTable = (t: Table) => {
     setCurrentTableId(t.id);
-    setOrder((o) => ({ ...o, tableId: t.id }));
-    setTables((ts) =>
-      ts.map((x) =>
-        x.id === t.id
-          ? { ...x, status: "occupied", currentOrderId: order.id }
-          : x
-      )
-    );
+
+    const saved = localStorage.getItem("order_table_" + t.id);
+
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setOrder((o) => ({
+        ...o,
+        tableId: t.id,
+        items: [
+          ...o.items.filter((li) => li.tableId !== t.id), // remove old items of this table
+          ...parsed.map((li: OrderItem) => ({ ...li, tableId: t.id })),
+        ],
+      }));
+    } else {
+      // table has no stored items
+      setOrder((o) => ({
+        ...o,
+        tableId: t.id,
+      }));
+    }
   };
 
   /* -------------------- add item via modifiers dialog -------------------- */
@@ -410,7 +421,23 @@ export default function POSPage() {
     });
   };
 
-  const confirmAddToOrder = () => {
+  async function getNextOrderItemDbId() {
+    const res = await axios.get(
+      process.env.NEXT_PUBLIC_API_LINK + "/api/fnborders/getlastitemid",
+      {
+        params: {
+          g_hash: localStorage.getItem("g_hash"),
+          user_id: localStorage.getItem("user_id"),
+        },
+      }
+    );
+
+    console.log("responseeeeeee", res);
+
+    return res.data.last_id + 1;
+  }
+
+  const confirmAddToOrder = async () => {
     if (!modItem) return;
     const issues = validateRequiredGroups(modItem.modifierGroups, modSelected);
     if (issues.length) {
@@ -418,10 +445,15 @@ export default function POSPage() {
       return;
     }
     const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
+    console.log("MODITEM -----------------", modItem);
+
+    const numericId = await getNextOrderItemDbId();
+
     const newLine: OrderItem = {
       uid: uid(),
-      itemId: modItem.id,
+      itemId: numericId,
       name: modItem.name,
+      tableId: currentTableId,
       basePrice: modItem.price,
       qty: modQty,
       kitchen: modItem.kitchenRoute || "Expo",
@@ -461,6 +493,102 @@ export default function POSPage() {
       items: o.items.map((x) => ({ ...x, sentToKitchen: true })),
     }));
     alert("Order sent to kitchen!");
+  };
+
+  const itemsForCurrentTable = useMemo(() => {
+    if (currentTableId) {
+      return order.items.filter((li) => li.tableId === currentTableId);
+    }
+    return order.items;
+  }, [order.items, currentTableId]);
+
+  useEffect(() => {
+    if (!currentTableId) return;
+
+    localStorage.setItem(
+      "order_table_" + currentTableId,
+      JSON.stringify(order.items.filter((li) => li.tableId === currentTableId))
+    );
+  }, [order.items, currentTableId]);
+
+  const saveOrderToDatabase = async () => {
+    try {
+      if (!order.items.length) {
+        alert("No items in order!");
+        return;
+      }
+
+      const g_hash = localStorage.getItem("g_hash");
+      const user_id = localStorage.getItem("user_id");
+      const store_id = localStorage.getItem("store_id");
+      const warehouse_id = localStorage.getItem("warehouse_id");
+
+      const isDineIn = currentTableId !== undefined && currentTableId !== null;
+
+      const order_type = isDineIn ? "dine_in" : "takeaway";
+      const formattedItems = order.items.map((li) => ({
+        item_id: Number(li.itemId),
+        quantity: li.qty,
+        price: li.basePrice + li.priceExtra,
+        discount: 0,
+        station_id: 1,
+        notes: li.note || "",
+      }));
+
+      const payload: any = {
+        g_hash: g_hash,
+        store_id: store_id,
+        warehouse_id: warehouse_id,
+        user_id: user_id,
+        sub_total: subtotal,
+        discount: 0,
+        total: total,
+        order_type: order_type,
+
+        customer_id: 0,
+        delcustomername: "",
+        delcustomerphone: "",
+        delcustomeraddress: "",
+
+        order_items: JSON.stringify(formattedItems),
+      };
+
+      if (isDineIn) {
+        payload.table_id = currentTableId;
+      }
+
+      console.log("Submitting order payload:", payload);
+
+      const response = await axios.post(
+        process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
+        payload
+      );
+
+      if (response.data.is_error === 1) {
+        alert("Order failed: " + response.data.error_msg);
+        return;
+      }
+
+      alert("Order saved successfully!");
+
+      // if dine in then clear saved items for this table
+      if (isDineIn) {
+        localStorage.removeItem(`order_table_${currentTableId}`);
+      }
+
+      // reset ui
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+      setCurrentTableId(undefined);
+    } catch (err) {
+      console.error("Order save error:", err);
+      alert("Failed to save order!");
+    }
   };
 
   /* -------------------- render -------------------- */
@@ -605,15 +733,17 @@ export default function POSPage() {
           </div>
 
           {/* Lines */}
+          {/* Lines */}
           <div className="flex-1 overflow-auto p-4">
-            {order.items.length === 0 ? (
+            {itemsForCurrentTable.length === 0 ? (
               <div className="grid h-full place-items-center text-sm text-gray-500">
                 Add items from the menu…
               </div>
             ) : (
               <ul className="space-y-2">
-                {order.items.map((li) => {
+                {itemsForCurrentTable.map((li) => {
                   const lineTotal = (li.basePrice + li.priceExtra) * li.qty;
+
                   return (
                     <li
                       key={li.uid}
@@ -634,6 +764,7 @@ export default function POSPage() {
                               </span>
                             )}
                           </div>
+
                           {/* modifiers */}
                           {li.modifiers.length > 0 && (
                             <div className="mt-1 text-xs text-gray-600">
@@ -654,12 +785,14 @@ export default function POSPage() {
                                 .join(", ")}
                             </div>
                           )}
+
                           {/* note */}
                           {li.note && (
                             <div className="mt-1 text-xs italic text-gray-500">
                               “{li.note}”
                             </div>
                           )}
+
                           <div className="mt-2 flex items-center gap-2">
                             <button
                               className="rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50"
@@ -676,9 +809,11 @@ export default function POSPage() {
                             >
                               <Minus className="h-4 w-4" />
                             </button>
+
                             <span className="w-8 text-center text-sm font-semibold">
                               {li.qty}
                             </span>
+
                             <button
                               className="rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50"
                               onClick={() =>
@@ -701,6 +836,7 @@ export default function POSPage() {
                             >
                               <Edit3 className="h-3.5 w-3.5" /> Edit
                             </button>
+
                             <button
                               className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
                               onClick={() => removeLine(li.uid)}
@@ -760,7 +896,10 @@ export default function POSPage() {
               >
                 <Send className="h-4 w-4" /> Send to Kitchen
               </button>
-              <button className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105">
+              <button
+                className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                onClick={saveOrderToDatabase}
+              >
                 Pay & Close
               </button>
             </div>
