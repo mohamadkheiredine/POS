@@ -663,6 +663,8 @@ export default function POSPage() {
     });
   };
 
+  
+
   /* -------------------- render -------------------- */
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
