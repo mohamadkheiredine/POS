@@ -643,6 +643,26 @@ export default function POSPage() {
     }, 250);
   };
 
+  // Recalculate active tables any time ordersInfo changes
+  useEffect(() => {
+    const actives = ordersInfo
+      .filter((o) => o.tableId && o.items && o.items.length > 0)
+      .map((o) => o.tableId);
+
+    setActiveTables(Array.from(new Set(actives)));
+  }, [ordersInfo]);
+
+  const startNewOrder = () => {
+    setCurrentTableId(undefined);
+    setOrder({
+      id: uid(),
+      guests: 0,
+      items: [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+  };
+
   /* -------------------- render -------------------- */
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
@@ -959,6 +979,14 @@ export default function POSPage() {
               >
                 <Send className="h-4 w-4" /> Send to Kitchen
               </button>
+
+              <button
+                className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                onClick={startNewOrder}
+              >
+                New Order
+              </button>
+
               <button
                 className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
                 onClick={saveOrderToDatabase}
