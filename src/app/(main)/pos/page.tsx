@@ -47,11 +47,11 @@ type ModifierGroup = {
 };
 
 type MenuItem = {
-  id: number; // REAL fi_id from DB
-  name: string; // fi_item_name
-  price: number; // you will fetch price
-  categoryId: number; // fi_category_id
-  categoryName?: string; // optional if you fetch category name
+  id: number;
+  name: string;
+  price: number;
+  categoryId: number;
+  categoryName?: string;
   kitchenRoute?: KitchenStation;
   modifierGroups?: ModifierGroup[];
 };
@@ -243,6 +243,7 @@ export default function POSPage() {
         name: it.fi_item_name,
         price: Number(it.fi_item_price ?? 0),
         categoryId: it.fi_category_id,
+        categoryName: it.category_name,
         kitchenRoute: it.kitchen_route || "Expo",
         modifierGroups: MODIFIERS[it.fi_item_name] || [],
       }))
@@ -255,11 +256,39 @@ export default function POSPage() {
 
   // UI state
   const [search, setSearch] = useState("");
+  const [categoriesList, setCategoriesList] = useState<
+    { id: number; name: string }[]
+  >([]);
+
   const [category, setCategory] = useState<string>("All");
-  const categories = useMemo(
-    () => ["All", ...Array.from(new Set(menu.map((m) => m.categoryId)))],
-    [menu]
-  );
+  const categories = useMemo(() => {
+    return ["All", ...categoriesList.map((c) => c.name)];
+  }, [categoriesList]);
+
+  const loadCategories = async () => {
+    const res = await axios.get(
+      process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/listitemcategories",
+      {
+        params: {
+          g_hash: localStorage.getItem("g_hash"),
+          user_id: localStorage.getItem("user_id"),
+        },
+      }
+    );
+
+    if (res.data.is_error === 1) return;
+
+    const cats = res.data.lst_item_categories.map((c: any) => ({
+      id: c.mc_id,
+      name: c.mc_category_name,
+    }));
+
+    setCategoriesList(cats);
+  };
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
 
   useEffect(() => {
     const fetchTables = async () => {
@@ -343,8 +372,7 @@ export default function POSPage() {
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
     return menu.filter((m) => {
-      const okCat =
-        category === "All" || String(m.categoryId) === String(category);
+      const okCat = category === "All" || m.categoryName === category;
       const okSearch = !q || m.name.toLowerCase().includes(q);
       return okCat && okSearch;
     });
