@@ -47,14 +47,13 @@ type ModifierGroup = {
 };
 
 type MenuItem = {
-  id: UID;
-  name: string;
-  price: number;
-  category: string;
-  sku?: string;
-  kitchenRoute?: KitchenStation; // default route
+  id: number; // REAL fi_id from DB
+  name: string; // fi_item_name
+  price: number; // you will fetch price
+  categoryId: number; // fi_category_id
+  categoryName?: string; // optional if you fetch category name
+  kitchenRoute?: KitchenStation;
   modifierGroups?: ModifierGroup[];
-  image?: string;
 };
 
 type AppliedModifier = {
@@ -64,7 +63,7 @@ type AppliedModifier = {
 
 type OrderItem = {
   uid: UID;
-  itemId: UID;
+  itemId: number;
   tableId?: number;
   name: string;
   basePrice: number;
@@ -177,54 +176,6 @@ const MODIFIERS: Record<string, ModifierGroup[]> = {
   ],
 };
 
-const MENU: MenuItem[] = [
-  {
-    id: "pizza-margherita",
-    name: "Margherita Pizza",
-    price: 9.0,
-    category: "Pizzas",
-    kitchenRoute: "Grill",
-    modifierGroups: MODIFIERS["pizza-margherita"],
-  },
-  {
-    id: "pizza-pepperoni",
-    name: "Pepperoni Pizza",
-    price: 11.0,
-    category: "Pizzas",
-    kitchenRoute: "Grill",
-    modifierGroups: MODIFIERS["pizza-margherita"],
-  },
-  {
-    id: "shawarma-chicken",
-    name: "Chicken Shawarma",
-    price: 8.5,
-    category: "Sandwiches",
-    kitchenRoute: "Grill",
-    modifierGroups: MODIFIERS["shawarma-chicken"],
-  },
-  {
-    id: "caesar-salad",
-    name: "Caesar Salad",
-    price: 7.0,
-    category: "Salads",
-    kitchenRoute: "Salad",
-  },
-  {
-    id: "fresh-mango",
-    name: "Fresh Mango Juice",
-    price: 3.5,
-    category: "Drinks",
-    kitchenRoute: "Bar",
-  },
-  {
-    id: "cheesecake",
-    name: "Cheesecake Slice",
-    price: 4.2,
-    category: "Desserts",
-    kitchenRoute: "Dessert",
-  },
-];
-
 /* =============================================================================
  * Helpers
  * ========================================================================== */
@@ -250,33 +201,64 @@ function priceFromModifiers(
   return extra;
 }
 
-function validateRequiredGroups(
-  groups: ModifierGroup[] | undefined,
-  selected: AppliedModifier[]
-) {
-  const issues: string[] = [];
-  if (!groups) return issues;
-  for (const g of groups) {
-    if (g.type !== "required") continue;
-    const chosen = selected.filter((s) => s.groupId === g.id).length;
-    const min = g.minSelect ?? 1;
-    if (chosen < min) {
-      issues.push(`Select ${min} in “${g.name}”.`);
-    }
-  }
-  return issues;
-}
+// function validateRequiredGroups(
+//   groups: ModifierGroup[] | undefined,
+//   selected: AppliedModifier[]
+// ) {
+//   const issues: string[] = [];
+//   if (!groups) return issues;
+//   for (const g of groups) {
+//     if (g.type !== "required") continue;
+//     const chosen = selected.filter((s) => s.groupId === g.id).length;
+//     const min = g.minSelect ?? 1;
+//     if (chosen < min) {
+//       issues.push(`Select ${min} in “${g.name}”.`);
+//     }
+//   }
+//   return issues;
+// }
 
 /* =============================================================================
  * Page
  * ========================================================================== */
 export default function POSPage() {
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+
+  const loadMenu = async () => {
+    const res = await axios.get(
+      process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
+      {
+        params: {
+          g_hash: localStorage.getItem("g_hash"),
+          user_id: localStorage.getItem("user_id"),
+        },
+      }
+    );
+
+    if (res.data.is_error === 1) return;
+
+    setMenu(
+      res.data.lst_items.map((it: any) => ({
+        id: it.fi_id,
+        name: it.fi_item_name,
+        price: Number(it.fi_item_price ?? 0),
+        categoryId: it.fi_category_id,
+        kitchenRoute: it.kitchen_route || "Expo",
+        modifierGroups: MODIFIERS[it.fi_item_name] || [],
+      }))
+    );
+  };
+
+  useEffect(() => {
+    loadMenu();
+  }, []);
+
   // UI state
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("All");
   const categories = useMemo(
-    () => ["All", ...Array.from(new Set(MENU.map((m) => m.category)))],
-    []
+    () => ["All", ...Array.from(new Set(menu.map((m) => m.categoryId)))],
+    [menu]
   );
 
   useEffect(() => {
@@ -312,6 +294,7 @@ export default function POSPage() {
   // Tables & order
   const [tables, setTables] = useState<Table[]>([]);
   const [currentTableId, setCurrentTableId] = useState<number | undefined>();
+  const [activeTables, setActiveTables] = useState<number[]>([]);
   const [order, setOrder] = useState<Order>({
     id: uid(),
     guests: 0,
@@ -319,6 +302,37 @@ export default function POSPage() {
     createdAt: Date.now(),
     status: "open",
   });
+  const [ordersInfo, setOrdersInfo] = useState<
+    { tableId: number; items: any[] }[]
+  >([]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("orders_info");
+      try {
+        const parsed: { tableId: number; items: OrderItem[] }[] =
+          JSON.parse(saved);
+
+        setOrdersInfo(parsed);
+
+        const actives = parsed
+          .filter(
+            (o) => o.tableId && o.tableId !== 0 && o.items && o.items.length > 0
+          )
+          .map((o) => o.tableId);
+
+        setActiveTables(Array.from(new Set(actives)));
+      } catch (e) {
+        console.error("Failed to parse orders_info from localStorage", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+    }
+  }, [ordersInfo]);
 
   // Modals / Drawers
   const [modItem, setModItem] = useState<MenuItem | null>(null); // item being configured
@@ -328,12 +342,13 @@ export default function POSPage() {
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return MENU.filter((m) => {
-      const okCat = category === "All" || m.category === category;
+    return menu.filter((m) => {
+      const okCat =
+        category === "All" || String(m.categoryId) === String(category);
       const okSearch = !q || m.name.toLowerCase().includes(q);
       return okCat && okSearch;
     });
-  }, [search, category]);
+  }, [search, category, menu]);
 
   const subtotal = useMemo(
     () =>
@@ -347,28 +362,18 @@ export default function POSPage() {
   const total = subtotal + tax;
 
   /* -------------------- table selection -------------------- */
-  const selectTable = (t: Table) => {
-    setCurrentTableId(t.id);
+  const selectTable = (table: Table) => {
+    setCurrentTableId(table.id);
 
-    const saved = localStorage.getItem("order_table_" + t.id);
+    const tableOrder = ordersInfo.find((o) => o.tableId === table.id);
 
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setOrder((o) => ({
-        ...o,
-        tableId: t.id,
-        items: [
-          ...o.items.filter((li) => li.tableId !== t.id), // remove old items of this table
-          ...parsed.map((li: OrderItem) => ({ ...li, tableId: t.id })),
-        ],
-      }));
-    } else {
-      // table has no stored items
-      setOrder((o) => ({
-        ...o,
-        tableId: t.id,
-      }));
-    }
+    setOrder({
+      id: uid(),
+      guests: 0,
+      items: tableOrder ? tableOrder.items : [],
+      createdAt: Date.now(),
+      status: "open",
+    });
   };
 
   /* -------------------- add item via modifiers dialog -------------------- */
@@ -421,39 +426,17 @@ export default function POSPage() {
     });
   };
 
-  async function getNextOrderItemDbId() {
-    const res = await axios.get(
-      process.env.NEXT_PUBLIC_API_LINK + "/api/fnborders/getlastitemid",
-      {
-        params: {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
-        },
-      }
-    );
-
-    console.log("responseeeeeee", res);
-
-    return res.data.last_id + 1;
-  }
-
   const confirmAddToOrder = async () => {
     if (!modItem) return;
-    const issues = validateRequiredGroups(modItem.modifierGroups, modSelected);
-    if (issues.length) {
-      alert(issues.join("\n"));
-      return;
-    }
-    const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
-    console.log("MODITEM -----------------", modItem);
 
-    const numericId = await getNextOrderItemDbId();
+    const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
+    const tableKey = currentTableId || 0;
 
     const newLine: OrderItem = {
       uid: uid(),
-      itemId: numericId,
+      itemId: modItem.id,
+      tableId: tableKey,
       name: modItem.name,
-      tableId: currentTableId,
       basePrice: modItem.price,
       qty: modQty,
       kitchen: modItem.kitchenRoute || "Expo",
@@ -462,7 +445,25 @@ export default function POSPage() {
       priceExtra,
       sentToKitchen: false,
     };
-    setOrder((o) => ({ ...o, items: [...o.items, newLine] }));
+
+    const updatedItems = [...order.items, newLine];
+    setOrder((o) => ({ ...o, items: updatedItems }));
+
+    const updatedOrders = [...ordersInfo];
+    const index = updatedOrders.findIndex((o) => o.tableId === tableKey);
+
+    if (index >= 0) {
+      updatedOrders[index].items = updatedItems;
+    } else {
+      updatedOrders.push({
+        tableId: tableKey,
+        items: updatedItems,
+      });
+    }
+
+    setOrdersInfo(updatedOrders);
+    saveOrdersInfo(updatedOrders);
+
     setModItem(null);
   };
 
@@ -471,7 +472,7 @@ export default function POSPage() {
   const applyEdit = () => {
     if (!editLine) return;
     // Recalculate extra (in case modifiers changed)
-    const it = MENU.find((m) => m.id === editLine.itemId);
+    const it = menu.find((m) => m.id === editLine.itemId);
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
     setOrder((o) => ({
@@ -502,93 +503,84 @@ export default function POSPage() {
     return order.items;
   }, [order.items, currentTableId]);
 
-  useEffect(() => {
-    if (!currentTableId) return;
+  function saveOrdersInfo(
+    allOrders: { tableId: number; items: OrderItem[] }[]
+  ) {
+    localStorage.setItem("orders_info", JSON.stringify(allOrders));
+  }
 
-    localStorage.setItem(
-      "order_table_" + currentTableId,
-      JSON.stringify(order.items.filter((li) => li.tableId === currentTableId))
-    );
-  }, [order.items, currentTableId]);
+  useEffect(() => {
+    localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+  }, [ordersInfo]);
 
   const saveOrderToDatabase = async () => {
-    try {
-      if (!order.items.length) {
-        alert("No items in order!");
-        return;
-      }
-
-      const g_hash = localStorage.getItem("g_hash");
-      const user_id = localStorage.getItem("user_id");
-      const store_id = localStorage.getItem("store_id");
-      const warehouse_id = localStorage.getItem("warehouse_id");
-
-      const isDineIn = currentTableId !== undefined && currentTableId !== null;
-
-      const order_type = isDineIn ? "dine_in" : "takeaway";
-      const formattedItems = order.items.map((li) => ({
-        item_id: Number(li.itemId),
-        quantity: li.qty,
-        price: li.basePrice + li.priceExtra,
-        discount: 0,
-        station_id: 1,
-        notes: li.note || "",
-      }));
-
-      const payload: any = {
-        g_hash: g_hash,
-        store_id: store_id,
-        warehouse_id: warehouse_id,
-        user_id: user_id,
-        sub_total: subtotal,
-        discount: 0,
-        total: total,
-        order_type: order_type,
-
-        customer_id: 0,
-        delcustomername: "",
-        delcustomerphone: "",
-        delcustomeraddress: "",
-
-        order_items: JSON.stringify(formattedItems),
-      };
-
-      if (isDineIn) {
-        payload.table_id = currentTableId;
-      }
-
-      console.log("Submitting order payload:", payload);
-
-      const response = await axios.post(
-        process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
-        payload
-      );
-
-      if (response.data.is_error === 1) {
-        alert("Order failed: " + response.data.error_msg);
-        return;
-      }
-
-      alert("Order saved successfully!");
-
-      // if dine in then clear saved items for this table
-      if (isDineIn) {
-        localStorage.removeItem(`order_table_${currentTableId}`);
-      }
-
-      // reset ui
-      setOrder({
-        id: uid(),
-        guests: 0,
-        items: [],
-        createdAt: Date.now(),
-        status: "open",
-      });
-      setCurrentTableId(undefined);
-    } catch (err) {
-      console.error("Order save error:", err);
-      alert("Failed to save order!");
+    const tableKey = currentTableId || 0;
+    let orderData = ordersInfo.find((o) => o.tableId === tableKey);
+    if (!orderData) {
+      orderData = { tableId: tableKey, items: order.items };
     }
+
+    if (!orderData.items || orderData.items.length === 0) {
+      return alert("No items to save");
+    }
+
+    const formattedItems = orderData.items.map((li) => ({
+      item_id: Number(li.itemId),
+      quantity: li.qty,
+      price: li.basePrice + li.priceExtra,
+      discount: 0,
+      station_id: 1,
+      notes: li.note || "",
+    }));
+
+    const orderType = currentTableId ? "dine_in" : "takeaway";
+
+    const payload = {
+      g_hash: localStorage.getItem("g_hash"),
+      store_id: localStorage.getItem("store_id"),
+      warehouse_id: localStorage.getItem("warehouse_id"),
+      user_id: localStorage.getItem("user_id"),
+      sub_total: subtotal,
+      discount: 0,
+      total: total,
+      order_type: orderType,
+      table_id: tableKey,
+      customer_id: 0,
+      delcustomername: "",
+      delcustomerphone: "",
+      delcustomeraddress: "",
+      order_items: JSON.stringify(formattedItems),
+    };
+
+    const response = await axios.post(
+      process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
+      payload
+    );
+
+    if (response.data.is_error === 1) return alert(response.data.error_msg);
+
+    if (response.data.receipt_html) {
+      const receiptWindow = window.open("", "_blank");
+      receiptWindow!.document.write(response.data.receipt_html);
+      receiptWindow!.document.close();
+    }
+
+    alert("Order saved!");
+
+    // Remove only items for this table OR takeaway
+    const left = ordersInfo.filter((o) => o.tableId !== tableKey);
+    setOrdersInfo(left);
+    saveOrdersInfo(left);
+
+    setOrder({
+      id: uid(),
+      guests: 0,
+      items: [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    setCurrentTableId(undefined);
   };
 
   /* -------------------- render -------------------- */
@@ -613,13 +605,15 @@ export default function POSPage() {
 
           <div className="grid grid-cols-3 gap-3">
             {tables.map((t) => {
-              const active = currentTableId === t.id;
-              const color =
-                t.statusId === 1
-                  ? "border-amber-300 bg-amber-50"
-                  : t.statusId === 2
-                  ? "border-emerald-300 bg-emerald-50"
-                  : "border-gray-200 bg-white";
+              const isCurrent = currentTableId === t.id;
+              const isActive = activeTables.includes(t.id);
+
+              const color = isCurrent
+                ? "border-orange-500 bg-orange-100" // selected table
+                : isActive
+                ? "border-orange-300 bg-orange-50" // has order
+                : "border-gray-200 bg-white"; // normal
+
               return (
                 <button
                   key={t.id}
@@ -628,12 +622,20 @@ export default function POSPage() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{t.label}</span>
-                    {active ? (
-                      <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
+
+                    {isCurrent && (
+                      <span className="rounded-full bg-orange-200 px-2 py-0.5 text-[10px] font-bold text-orange-700">
                         ACTIVE
                       </span>
-                    ) : null}
+                    )}
+
+                    {!isCurrent && isActive && (
+                      <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
+                        HAS ORDER
+                      </span>
+                    )}
                   </div>
+
                   <div className="mt-4 text-xs text-gray-600">
                     {t.numberSeats} seats
                   </div>
@@ -770,7 +772,7 @@ export default function POSPage() {
                             <div className="mt-1 text-xs text-gray-600">
                               {li.modifiers
                                 .map((m) => {
-                                  const it = MENU.find(
+                                  const it = menu.find(
                                     (x) => x.id === li.itemId
                                   );
                                   const g = it?.modifierGroups?.find(
@@ -1167,125 +1169,126 @@ export default function POSPage() {
                   Modifiers
                 </div>
                 <div className="space-y-3">
-                  {MENU.find(
-                    (m) => m.id === editLine.itemId
-                  )?.modifierGroups?.map((g) => {
-                    const lineInGroup = editLine.modifiers.filter(
-                      (s) => s.groupId === g.id
-                    );
-                    const max = g.maxSelect ?? (g.type === "required" ? 1 : 0);
-                    const toggle = (op: ModifierOption) => {
-                      setEditLine((l) => {
-                        if (!l) return l;
-                        const exists = l.modifiers.some(
-                          (s) => s.groupId === g.id && s.optionId === op.id
-                        );
-                        if (g.type === "required" && (max === 1 || !max)) {
-                          const filtered = l.modifiers.filter(
-                            (s) => s.groupId !== g.id
+                  {menu
+                    .find((m) => m.id === editLine.itemId)
+                    ?.modifierGroups?.map((g) => {
+                      const lineInGroup = editLine.modifiers.filter(
+                        (s) => s.groupId === g.id
+                      );
+                      const max =
+                        g.maxSelect ?? (g.type === "required" ? 1 : 0);
+                      const toggle = (op: ModifierOption) => {
+                        setEditLine((l) => {
+                          if (!l) return l;
+                          const exists = l.modifiers.some(
+                            (s) => s.groupId === g.id && s.optionId === op.id
                           );
-                          return exists
-                            ? { ...l, modifiers: filtered }
-                            : {
+                          if (g.type === "required" && (max === 1 || !max)) {
+                            const filtered = l.modifiers.filter(
+                              (s) => s.groupId !== g.id
+                            );
+                            return exists
+                              ? { ...l, modifiers: filtered }
+                              : {
+                                  ...l,
+                                  modifiers: [
+                                    ...filtered,
+                                    { groupId: g.id, optionId: op.id },
+                                  ],
+                                };
+                          }
+                          if (exists) {
+                            return {
+                              ...l,
+                              modifiers: l.modifiers.filter(
+                                (s) =>
+                                  !(s.groupId === g.id && s.optionId === op.id)
+                              ),
+                            };
+                          } else {
+                            const inG = l.modifiers.filter(
+                              (s) => s.groupId === g.id
+                            );
+                            if (max && inG.length >= max) {
+                              const others = l.modifiers.filter(
+                                (s) => s.groupId !== g.id
+                              );
+                              const keep = inG.slice(1);
+                              return {
                                 ...l,
                                 modifiers: [
-                                  ...filtered,
+                                  ...others,
+                                  ...keep,
                                   { groupId: g.id, optionId: op.id },
                                 ],
                               };
-                        }
-                        if (exists) {
-                          return {
-                            ...l,
-                            modifiers: l.modifiers.filter(
-                              (s) =>
-                                !(s.groupId === g.id && s.optionId === op.id)
-                            ),
-                          };
-                        } else {
-                          const inG = l.modifiers.filter(
-                            (s) => s.groupId === g.id
-                          );
-                          if (max && inG.length >= max) {
-                            const others = l.modifiers.filter(
-                              (s) => s.groupId !== g.id
-                            );
-                            const keep = inG.slice(1);
+                            }
                             return {
                               ...l,
                               modifiers: [
-                                ...others,
-                                ...keep,
+                                ...l.modifiers,
                                 { groupId: g.id, optionId: op.id },
                               ],
                             };
                           }
-                          return {
-                            ...l,
-                            modifiers: [
-                              ...l.modifiers,
-                              { groupId: g.id, optionId: op.id },
-                            ],
-                          };
-                        }
-                      });
-                    };
-                    return (
-                      <div
-                        key={g.id}
-                        className="rounded-xl border border-gray-200 p-3"
-                      >
-                        <div className="mb-1 flex items-center justify-between">
-                          <div className="text-sm font-semibold">
-                            {g.name}{" "}
-                            {g.type === "required" && (
-                              <span className="text-amber-700 text-xs">
-                                (required)
-                              </span>
-                            )}
+                        });
+                      };
+                      return (
+                        <div
+                          key={g.id}
+                          className="rounded-xl border border-gray-200 p-3"
+                        >
+                          <div className="mb-1 flex items-center justify-between">
+                            <div className="text-sm font-semibold">
+                              {g.name}{" "}
+                              {g.type === "required" && (
+                                <span className="text-amber-700 text-xs">
+                                  (required)
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-gray-500">
+                              {max ? `max ${max}` : "multi"}
+                            </div>
                           </div>
-                          <div className="text-[11px] text-gray-500">
-                            {max ? `max ${max}` : "multi"}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          {g.options.map((op) => {
-                            const picked = lineInGroup.some(
-                              (s) => s.optionId === op.id
-                            );
-                            return (
-                              <button
-                                key={op.id}
-                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
+                          <div className="space-y-1">
+                            {g.options.map((op) => {
+                              const picked = lineInGroup.some(
+                                (s) => s.optionId === op.id
+                              );
+                              return (
+                                <button
+                                  key={op.id}
+                                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                                 ${
                                   picked
                                     ? "border-orange-300 bg-orange-50"
                                     : "border-gray-200 bg-white hover:bg-gray-50"
                                 }`}
-                                onClick={() => toggle(op)}
-                              >
-                                <span className="flex items-center gap-2">
-                                  {picked ? (
-                                    <SquareCheck className="h-4 w-4 text-orange-600" />
-                                  ) : (
-                                    <Square className="h-4 w-4 text-gray-400" />
-                                  )}
-                                  {op.name}
-                                </span>
-                                <span className="text-gray-700">
-                                  {op.priceDelta
-                                    ? op.priceDelta > 0
-                                      ? `+${money(op.priceDelta)}`
-                                      : `${money(op.priceDelta)}`
-                                    : ""}
-                                </span>
-                              </button>
-                            );
-                          })}
+                                  onClick={() => toggle(op)}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    {picked ? (
+                                      <SquareCheck className="h-4 w-4 text-orange-600" />
+                                    ) : (
+                                      <Square className="h-4 w-4 text-gray-400" />
+                                    )}
+                                    {op.name}
+                                  </span>
+                                  <span className="text-gray-700">
+                                    {op.priceDelta
+                                      ? op.priceDelta > 0
+                                        ? `+${money(op.priceDelta)}`
+                                        : `${money(op.priceDelta)}`
+                                      : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </div>
 
@@ -1322,7 +1325,7 @@ export default function POSPage() {
                     {money(
                       (editLine.basePrice +
                         priceFromModifiers(
-                          MENU.find((m) => m.id === editLine.itemId)
+                          menu.find((m) => m.id === editLine.itemId)
                             ?.modifierGroups,
                           editLine.modifiers
                         )) *
