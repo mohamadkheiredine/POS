@@ -368,6 +368,7 @@ export default function POSPage() {
   const [modSelected, setModSelected] = useState<AppliedModifier[]>([]);
   const [modQty, setModQty] = useState(1);
   const [editLine, setEditLine] = useState<OrderItem | null>(null);
+  const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -588,9 +589,7 @@ export default function POSPage() {
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
     if (response.data.receipt_html) {
-      const receiptWindow = window.open("", "_blank");
-      receiptWindow!.document.write(response.data.receipt_html);
-      receiptWindow!.document.close();
+      setReceiptHTML(response.data.receipt_html);
     }
 
     alert("Order saved!");
@@ -611,9 +610,43 @@ export default function POSPage() {
     setCurrentTableId(undefined);
   };
 
+  const printReceipt = () => {
+    if (!receiptHTML) return;
+
+    const iframe = document.getElementById("print-iframe") as HTMLIFrameElement;
+    const doc = iframe.contentWindow?.document;
+
+    if (!doc) {
+      alert("Unable to print: iframe not found");
+      return;
+    }
+
+    doc.open();
+    doc.write(`
+    <html>
+      <head>
+        <title>Receipt</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 10px; }
+          @page { margin: 0; }
+        </style>
+      </head>
+      <body>
+        ${receiptHTML}
+      </body>
+    </html>
+  `);
+    doc.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    }, 250);
+  };
+
   /* -------------------- render -------------------- */
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
+      <iframe id="print-iframe" style={{ display: "none" }} />
       <div className="mx-auto grid w-full max-w-[1600px] gap-4 lg:grid-cols-[370px_minmax(420px,1fr)_420px]">
         {/* LEFT: Tables */}
         <section className="overflow-hidden rounded-3xl bg-white/80 p-4 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
@@ -939,7 +972,9 @@ export default function POSPage() {
 
       {/* ───────────────────────── Modifiers Dialog ───────────────────────── */}
       {modItem && (
+        // container of modal
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4">
+          {/* the modal here */}
           <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white p-0 shadow-xl">
             <div className="flex items-center justify-between border-b px-5 py-3">
               <div className="font-bold text-gray-900">{modItem.name}</div>
@@ -1118,6 +1153,52 @@ export default function POSPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------receipt modal--------- */}
+      {receiptHTML && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-3xl bg-white shadow-xl overflow-hidden">
+            {/* HEADER */}
+            <div className="flex items-center justify-between border-b px-6 py-3">
+              <h2 className="text-lg font-bold text-gray-900">
+                Receipt Preview
+              </h2>
+              <button
+                onClick={() => setReceiptHTML(null)}
+                className="rounded-lg p-1 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* CONTENT — visible preview */}
+            <div className="p-5 max-h-[70vh] overflow-auto">
+              <div
+                className="receipt-preview"
+                dangerouslySetInnerHTML={{ __html: receiptHTML }}
+              />
+            </div>
+
+            {/* FOOTER with print */}
+            <div className="border-t px-6 py-3 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setReceiptHTML(null)}
+                className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+              >
+                Close
+              </button>
+
+              <button
+                onClick={() => printReceipt()}
+                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+              >
+                <Printer className="h-4 w-4 inline-block mr-1" />
+                Print
+              </button>
             </div>
           </div>
         </div>
@@ -1390,6 +1471,10 @@ export default function POSPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div id="printable-receipt" style={{ display: "none" }}>
+            <div dangerouslySetInnerHTML={{ __html: receiptHTML ?? "" }} />
           </div>
         </div>
       )}
