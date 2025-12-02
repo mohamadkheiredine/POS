@@ -110,12 +110,6 @@ export default function OrdersPage() {
           user_id: localStorage.getItem("user_id"),
         };
 
-        if (search.trim() !== "") {
-          params.q = search.trim();
-        }
-        if (warehouse !== "") {
-          params.warehouse_id = warehouse;
-        }
         if (dateFrom) {
           params.date_from = dateFrom.toISOString().slice(0, 10); // YYYY-MM-DD
         }
@@ -150,7 +144,7 @@ export default function OrdersPage() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [search, warehouse, dateFrom, dateTo]);
+  }, [dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -250,21 +244,7 @@ export default function OrdersPage() {
         <div className="flex flex-wrap items-center gap-3 bg-white p-3 rounded-2xl shadow-sm border">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by code or warehouse…"
-              className="w-72 rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm"
-            />
           </div>
-
-          <input
-            type="number"
-            placeholder="Warehouse"
-            value={warehouse}
-            onChange={(e) => setWarehouse(e.target.value)}
-            className="rounded-2xl border border-gray-200 bg-white px-3 py-2 text-sm w-40"
-          />
 
           <DatePopup
             label="From"
@@ -310,14 +290,6 @@ export default function OrdersPage() {
                       {money(o.total)}
                     </td>
                     <td>{new Date(o.createdAt).toLocaleString()}</td>
-                    {/* <td className="text-right">
-                      <button
-                        onClick={() => startEdit(o)}
-                        className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs hover:bg-gray-50"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                    </td> */}
                   </tr>
                 ))}
 

@@ -249,15 +249,15 @@ export default function POSPage() {
 
     setMenu(
       res.data.lst_items.map((it: any) => ({
-        id: it.fi_id,
-        name: it.fi_item_name,
-        price: Number(it.fi_item_price ?? 0),
-        categoryId: it.fi_category_id,
+        id: it.mi_id,
+        name: it.mi_item_name,
+        price: Number(it.mi_base_price ?? 0),
+        categoryId: it.mi_category_id,
         currency_code: it.currency_code,
         cc_id: it.cc_id,
         categoryName: it.category_name,
         kitchenRoute: it.kitchen_route || "Expo",
-        modifierGroups: MODIFIERS[it.fi_item_name] || [],
+        modifierGroups: MODIFIERS[it.mi_item_name] || [],
       }))
     );
   };
