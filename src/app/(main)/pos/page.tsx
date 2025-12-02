@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { use, useEffect, useMemo, useState } from "react";
 import {
   Search,
   X,
@@ -51,6 +51,8 @@ type MenuItem = {
   name: string;
   price: number;
   categoryId: number;
+  currency_code: string,
+  cc_id: number,
   categoryName?: string;
   kitchenRoute?: KitchenStation;
   modifierGroups?: ModifierGroup[];
@@ -223,7 +225,15 @@ function priceFromModifiers(
  * ========================================================================== */
 export default function POSPage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<number>(0);
+  const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
 
+
+  useEffect(() => {
+    setCurrencySymbol(localStorage.getItem("currency_symbol") || "");
+  },[]);
+
+//currency_symbol
   const loadMenu = async () => {
     const res = await axios.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
@@ -243,6 +253,8 @@ export default function POSPage() {
         name: it.fi_item_name,
         price: Number(it.fi_item_price ?? 0),
         categoryId: it.fi_category_id,
+        currency_code: it.currency_code,
+        cc_id: it.cc_id,
         categoryName: it.category_name,
         kitchenRoute: it.kitchen_route || "Expo",
         modifierGroups: MODIFIERS[it.fi_item_name] || [],
@@ -337,7 +349,7 @@ export default function POSPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("orders_info");
+      const saved:any = localStorage.getItem("orders_info");
       try {
         const parsed: { tableId: number; items: OrderItem[] }[] =
           JSON.parse(saved);
@@ -731,64 +743,64 @@ export default function POSPage() {
         {/* MIDDLE: Menu */}
         <section className="overflow-hidden rounded-3xl bg-white/80 p-4 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
           {/* Search + Categories */}
-          <div className="mb-3 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search menu…"
-                className="w-full rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
-                onClick={() => setCategory("All")}
-              >
-                All
-              </button>
-              <div className="relative">
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
-                >
-                  {categories.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
+          {/* ======================== CATEGORY BAR ======================== */}
+<div className="mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
 
-          {/* Grid */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-            {filteredMenu.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => addItemStart(m)}
-                className="flex h-28 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 text-left transition hover:border-orange-300 hover:bg-orange-50"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="line-clamp-2 text-sm font-semibold text-gray-800">
-                    {m.name}
-                  </span>
-                  <span className="rounded-full bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                    {m.category}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-extrabold text-gray-900">
-                    $ {money(m.price)}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                    <ChefHat className="h-3.5 w-3.5" /> {m.kitchenRoute}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
+  {/* "All" category */}
+  <button
+    onClick={() => setSelectedCategory(0)}
+    className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
+      ${selectedCategory === 0 
+        ? "bg-orange-500 text-white border-orange-500" 
+        : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
+      }`}
+  >
+    All
+  </button>
+
+  {/* Dynamic categories */}
+  {categoriesList.map((cat) => (
+    <button
+      key={cat.id}
+      onClick={() => setSelectedCategory(cat.id)}
+      className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
+        ${selectedCategory === cat.id 
+          ? "bg-orange-500 text-white border-orange-500" 
+          : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
+        }`}
+    >
+      {cat.name}
+    </button>
+  ))}
+</div>
+
+
+{/* ======================== ITEMS GRID ======================== */}
+<div className="grid grid-cols-4 gap-4">
+  {filteredMenu
+    .filter((m) => selectedCategory === 0 || m.categoryId === selectedCategory)
+    .map((item) => (
+      <button
+        key={item.id}
+        onClick={() => addItemStart(item)}
+        className="flex h-28 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-orange-300 hover:bg-orange-50 transition"
+      >
+        <span className="line-clamp-2 text-sm font-semibold text-gray-900">
+          {item.name}
+        </span>
+
+        <div className="flex justify-between text-sm">
+          <span className="font-bold text-gray-900">
+            {item.currency_code} {money(item.price)}
+          </span>
+          <span className="text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
+            {item.categoryName}
+          </span>
+        </div>
+      </button>
+    ))}
+</div>
+
         </section>
 
         {/* RIGHT: Order Ticket */}
@@ -1103,7 +1115,7 @@ export default function POSPage() {
                   </button>
                 </div>
 
-                <div className="mb-2 text-sm text-gray-600">
+                {/* <div className="mb-2 text-sm text-gray-600">
                   Kitchen Station
                 </div>
                 <select
@@ -1118,7 +1130,7 @@ export default function POSPage() {
                   {KITCHEN_STATIONS.map((k) => (
                     <option key={k}>{k}</option>
                   ))}
-                </select>
+                </select> */}
 
                 <div className="mb-2 text-sm text-gray-600">Chosen</div>
                 <ul className="mb-4 space-y-1 text-sm">
@@ -1155,7 +1167,7 @@ export default function POSPage() {
                     Line Total
                   </span>
                   <span className="text-lg font-extrabold text-orange-700">
-                    ${" "}
+                    {CurrencySymbol}{" "}
                     {money(
                       (modItem.price +
                         priceFromModifiers(
