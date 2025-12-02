@@ -51,8 +51,8 @@ type MenuItem = {
   name: string;
   price: number;
   categoryId: number;
-  currency_code: string,
-  cc_id: number,
+  currency_code: string;
+  cc_id: number;
   categoryName?: string;
   kitchenRoute?: KitchenStation;
   modifierGroups?: ModifierGroup[];
@@ -203,22 +203,7 @@ function priceFromModifiers(
   return extra;
 }
 
-// function validateRequiredGroups(
-//   groups: ModifierGroup[] | undefined,
-//   selected: AppliedModifier[]
-// ) {
-//   const issues: string[] = [];
-//   if (!groups) return issues;
-//   for (const g of groups) {
-//     if (g.type !== "required") continue;
-//     const chosen = selected.filter((s) => s.groupId === g.id).length;
-//     const min = g.minSelect ?? 1;
-//     if (chosen < min) {
-//       issues.push(`Select ${min} in “${g.name}”.`);
-//     }
-//   }
-//   return issues;
-// }
+const USE_MODIFIERS = process.env.NEXT_PUBLIC_USE_MODIFIER === "true";
 
 /* =============================================================================
  * Page
@@ -228,12 +213,43 @@ export default function POSPage() {
   const [selectedCategory, setSelectedCategory] = useState<number>(0);
   const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
 
+  const [modifiers, setModifiers] = useState<{ id: number; name: string; price: number }[]>(
+    []
+  );
+
+  const loadModifiers = async () => {
+    const res = await axios.get(
+      process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistmodifiers",
+      {
+        params: {
+          g_hash: localStorage.getItem("g_hash"),
+          user_id: localStorage.getItem("user_id"),
+        },
+      }
+    );
+
+    console.log(" result  ", res);
+
+    if (res.data.is_error === 1) return;
+
+    setModifiers(
+      res.data.lst_modifiers.map((m: any) => ({
+        id: m.m_id,
+        name: m.m_modifier_name,
+        price: Number(m.m_price_modifier),
+      }))
+    );
+  };
+
+  useEffect(() => {
+    loadModifiers();
+  }, []);
 
   useEffect(() => {
     setCurrencySymbol(localStorage.getItem("currency_symbol") || "");
-  },[]);
+  }, []);
 
-//currency_symbol
+  //currency_symbol
   const loadMenu = async () => {
     const res = await axios.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
@@ -257,14 +273,30 @@ export default function POSPage() {
         cc_id: it.cc_id,
         categoryName: it.category_name,
         kitchenRoute: it.kitchen_route || "Expo",
-        modifierGroups: MODIFIERS[it.mi_item_name] || [],
+        modifierGroups: USE_MODIFIERS
+          ? [
+              {
+                id: "options",
+                name: "Options",
+                type: "optional",
+                maxSelect: 0,
+                options: modifiers.map((m) => ({
+                  id: "opt-" + m.id,
+                  name: m.name,
+                  priceDelta: Number(m.price),
+                })),
+              },
+            ]
+          : [],
       }))
     );
   };
 
   useEffect(() => {
-    loadMenu();
-  }, []);
+    if (modifiers.length > 0) {
+      loadMenu();
+    }
+  }, [modifiers]);
 
   // UI state
   const [search, setSearch] = useState("");
@@ -349,7 +381,7 @@ export default function POSPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const saved:any = localStorage.getItem("orders_info");
+      const saved: any = localStorage.getItem("orders_info");
       try {
         const parsed: { tableId: number; items: OrderItem[] }[] =
           JSON.parse(saved);
@@ -418,15 +450,34 @@ export default function POSPage() {
   };
 
   /* -------------------- add item via modifiers dialog -------------------- */
+  // const addItemStart = (item: MenuItem) => {
+  //   setModItem(item);
+  //   // default selected = defaults from groups
+  //   const selected: AppliedModifier[] = [];
+  //   item.modifierGroups?.forEach((g) => {
+  //     g.options.forEach((op) => {
+  //       if (op.default) selected.push({ groupId: g.id, optionId: op.id });
+  //     });
+  //   });
+  //   setModSelected(selected);
+  //   setModQty(1);
+  // };
+
   const addItemStart = (item: MenuItem) => {
     setModItem(item);
-    // default selected = defaults from groups
+    if (!USE_MODIFIERS) {
+      setModSelected([]);
+      setModQty(1);
+      return;
+    }
+
     const selected: AppliedModifier[] = [];
     item.modifierGroups?.forEach((g) => {
       g.options.forEach((op) => {
         if (op.default) selected.push({ groupId: g.id, optionId: op.id });
       });
     });
+
     setModSelected(selected);
     setModQty(1);
   };
@@ -675,8 +726,6 @@ export default function POSPage() {
     });
   };
 
-  
-
   /* -------------------- render -------------------- */
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
@@ -744,63 +793,65 @@ export default function POSPage() {
         <section className="overflow-hidden rounded-3xl bg-white/80 p-4 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
           {/* Search + Categories */}
           {/* ======================== CATEGORY BAR ======================== */}
-<div className="mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-
-  {/* "All" category */}
-  <button
-    onClick={() => setSelectedCategory(0)}
-    className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
-      ${selectedCategory === 0 
-        ? "bg-orange-500 text-white border-orange-500" 
-        : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
-      }`}
-  >
-    All
-  </button>
-
-  {/* Dynamic categories */}
-  {categoriesList.map((cat) => (
-    <button
-      key={cat.id}
-      onClick={() => setSelectedCategory(cat.id)}
-      className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
-        ${selectedCategory === cat.id 
-          ? "bg-orange-500 text-white border-orange-500" 
+          <div className="mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {/* "All" category */}
+            <button
+              onClick={() => setSelectedCategory(0)}
+              className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
+      ${
+        selectedCategory === 0
+          ? "bg-orange-500 text-white border-orange-500"
           : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
+      }`}
+            >
+              All
+            </button>
+
+            {/* Dynamic categories */}
+            {categoriesList.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
+        ${
+          selectedCategory === cat.id
+            ? "bg-orange-500 text-white border-orange-500"
+            : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
         }`}
-    >
-      {cat.name}
-    </button>
-  ))}
-</div>
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
 
+          {/* ======================== ITEMS GRID ======================== */}
+          <div className="grid grid-cols-4 gap-4">
+            {filteredMenu
+              .filter(
+                (m) =>
+                  selectedCategory === 0 || m.categoryId === selectedCategory
+              )
+              .map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => addItemStart(item)}
+                  className="flex h-28 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-orange-300 hover:bg-orange-50 transition"
+                >
+                  <span className="line-clamp-2 text-sm font-semibold text-gray-900">
+                    {item.name}
+                  </span>
 
-{/* ======================== ITEMS GRID ======================== */}
-<div className="grid grid-cols-4 gap-4">
-  {filteredMenu
-    .filter((m) => selectedCategory === 0 || m.categoryId === selectedCategory)
-    .map((item) => (
-      <button
-        key={item.id}
-        onClick={() => addItemStart(item)}
-        className="flex h-28 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-orange-300 hover:bg-orange-50 transition"
-      >
-        <span className="line-clamp-2 text-sm font-semibold text-gray-900">
-          {item.name}
-        </span>
-
-        <div className="flex justify-between text-sm">
-          <span className="font-bold text-gray-900">
-            {item.currency_code} {money(item.price)}
-          </span>
-          <span className="text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
-            {item.categoryName}
-          </span>
-        </div>
-      </button>
-    ))}
-</div>
-
+                  <div className="flex justify-between text-sm">
+                    <span className="font-bold text-gray-900">
+                      {item.currency_code} {money(item.price)}
+                    </span>
+                    <span className="text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
+                      {item.categoryName}
+                    </span>
+                  </div>
+                </button>
+              ))}
+          </div>
         </section>
 
         {/* RIGHT: Order Ticket */}
@@ -1029,70 +1080,78 @@ export default function POSPage() {
               </button>
             </div>
 
-            <div className="grid gap-5 p-5 md:grid-cols-2">
+            <div
+              className={`grid gap-5 p-5 ${
+                USE_MODIFIERS ? "md:grid-cols-2" : "md:grid-cols-1"
+              }`}
+            >
               {/* Groups */}
-              <div className="space-y-4">
-                {modItem.modifierGroups?.map((g) => {
-                  const inGroup = modSelected.filter((s) => s.groupId === g.id);
-                  const max = g.maxSelect ?? (g.type === "required" ? 1 : 0);
-                  return (
-                    <div
-                      key={g.id}
-                      className="rounded-2xl border border-gray-200 bg-white p-3"
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="text-sm font-semibold text-gray-900">
-                          {g.name}{" "}
-                          {g.type === "required" && (
-                            <span className="text-xs font-medium text-amber-700">
-                              {" "}
-                              (required)
-                            </span>
-                          )}
+              {USE_MODIFIERS && (
+                <div className="space-y-4">
+                  {modItem.modifierGroups?.map((g) => {
+                    const inGroup = modSelected.filter(
+                      (s) => s.groupId === g.id
+                    );
+                    const max = g.maxSelect ?? (g.type === "required" ? 1 : 0);
+                    return (
+                      <div
+                        key={g.id}
+                        className="rounded-2xl border border-gray-200 bg-white p-3"
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-sm font-semibold text-gray-900">
+                            {g.name}{" "}
+                            {g.type === "required" && (
+                              <span className="text-xs font-medium text-amber-700">
+                                {" "}
+                                (required)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {max ? `max ${max}` : "multi"}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-gray-500">
-                          {max ? `max ${max}` : "multi"}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        {g.options.map((op) => {
-                          const picked = inGroup.some(
-                            (s) => s.optionId === op.id
-                          );
-                          return (
-                            <button
-                              key={op.id}
-                              className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
+                        <div className="space-y-1">
+                          {g.options.map((op) => {
+                            const picked = inGroup.some(
+                              (s) => s.optionId === op.id
+                            );
+                            return (
+                              <button
+                                key={op.id}
+                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                               ${
                                 picked
                                   ? "border-orange-300 bg-orange-50"
                                   : "border-gray-200 bg-white hover:bg-gray-50"
                               }`}
-                              onClick={() => toggleModifier(g, op)}
-                            >
-                              <span className="flex items-center gap-2">
-                                {picked ? (
-                                  <SquareCheck className="h-4 w-4 text-orange-600" />
-                                ) : (
-                                  <Square className="h-4 w-4 text-gray-400" />
-                                )}
-                                {op.name}
-                              </span>
-                              <span className="text-gray-700">
-                                {op.priceDelta
-                                  ? op.priceDelta > 0
-                                    ? `+${money(op.priceDelta)}`
-                                    : `${money(op.priceDelta)}`
-                                  : ""}
-                              </span>
-                            </button>
-                          );
-                        })}
+                                onClick={() => toggleModifier(g, op)}
+                              >
+                                <span className="flex items-center gap-2">
+                                  {picked ? (
+                                    <SquareCheck className="h-4 w-4 text-orange-600" />
+                                  ) : (
+                                    <Square className="h-4 w-4 text-gray-400" />
+                                  )}
+                                  {op.name}
+                                </span>
+                                <span className="text-gray-700">
+                                  {op.priceDelta
+                                    ? op.priceDelta > 0
+                                      ? `+${money(op.priceDelta)}`
+                                      : `${money(op.priceDelta)}`
+                                    : ""}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Summary */}
               <div className="rounded-2xl border border-gray-200 bg-white p-4">
@@ -1293,155 +1352,161 @@ export default function POSPage() {
               </div>
 
               {/* Kitchen */}
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-gray-700">
-                  Kitchen Station
-                </label>
-                <select
-                  value={editLine.kitchen}
-                  onChange={(e) =>
-                    setEditLine((l) =>
-                      l
-                        ? { ...l, kitchen: e.target.value as KitchenStation }
-                        : l
-                    )
-                  }
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
-                >
-                  {KITCHEN_STATIONS.map((k) => (
-                    <option key={k}>{k}</option>
-                  ))}
-                </select>
-              </div>
+              {USE_MODIFIERS && (
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-gray-700">
+                    Kitchen Station
+                  </label>
+                  <select
+                    value={editLine.kitchen}
+                    onChange={(e) =>
+                      setEditLine((l) =>
+                        l
+                          ? { ...l, kitchen: e.target.value as KitchenStation }
+                          : l
+                      )
+                    }
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                  >
+                    {KITCHEN_STATIONS.map((k) => (
+                      <option key={k}>{k}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Modifiers */}
-              <div>
-                <div className="mb-2 text-sm font-semibold text-gray-700">
-                  Modifiers
-                </div>
-                <div className="space-y-3">
-                  {menu
-                    .find((m) => m.id === editLine.itemId)
-                    ?.modifierGroups?.map((g) => {
-                      const lineInGroup = editLine.modifiers.filter(
-                        (s) => s.groupId === g.id
-                      );
-                      const max =
-                        g.maxSelect ?? (g.type === "required" ? 1 : 0);
-                      const toggle = (op: ModifierOption) => {
-                        setEditLine((l) => {
-                          if (!l) return l;
-                          const exists = l.modifiers.some(
-                            (s) => s.groupId === g.id && s.optionId === op.id
-                          );
-                          if (g.type === "required" && (max === 1 || !max)) {
-                            const filtered = l.modifiers.filter(
-                              (s) => s.groupId !== g.id
+              {USE_MODIFIERS && (
+                <div>
+                  <div className="mb-2 text-sm font-semibold text-gray-700">
+                    Modifiers
+                  </div>
+                  <div className="space-y-3">
+                    {menu
+                      .find((m) => m.id === editLine.itemId)
+                      ?.modifierGroups?.map((g) => {
+                        const lineInGroup = editLine.modifiers.filter(
+                          (s) => s.groupId === g.id
+                        );
+                        const max =
+                          g.maxSelect ?? (g.type === "required" ? 1 : 0);
+                        const toggle = (op: ModifierOption) => {
+                          setEditLine((l) => {
+                            if (!l) return l;
+                            const exists = l.modifiers.some(
+                              (s) => s.groupId === g.id && s.optionId === op.id
                             );
-                            return exists
-                              ? { ...l, modifiers: filtered }
-                              : {
+                            if (g.type === "required" && (max === 1 || !max)) {
+                              const filtered = l.modifiers.filter(
+                                (s) => s.groupId !== g.id
+                              );
+                              return exists
+                                ? { ...l, modifiers: filtered }
+                                : {
+                                    ...l,
+                                    modifiers: [
+                                      ...filtered,
+                                      { groupId: g.id, optionId: op.id },
+                                    ],
+                                  };
+                            }
+                            if (exists) {
+                              return {
+                                ...l,
+                                modifiers: l.modifiers.filter(
+                                  (s) =>
+                                    !(
+                                      s.groupId === g.id && s.optionId === op.id
+                                    )
+                                ),
+                              };
+                            } else {
+                              const inG = l.modifiers.filter(
+                                (s) => s.groupId === g.id
+                              );
+                              if (max && inG.length >= max) {
+                                const others = l.modifiers.filter(
+                                  (s) => s.groupId !== g.id
+                                );
+                                const keep = inG.slice(1);
+                                return {
                                   ...l,
                                   modifiers: [
-                                    ...filtered,
+                                    ...others,
+                                    ...keep,
                                     { groupId: g.id, optionId: op.id },
                                   ],
                                 };
-                          }
-                          if (exists) {
-                            return {
-                              ...l,
-                              modifiers: l.modifiers.filter(
-                                (s) =>
-                                  !(s.groupId === g.id && s.optionId === op.id)
-                              ),
-                            };
-                          } else {
-                            const inG = l.modifiers.filter(
-                              (s) => s.groupId === g.id
-                            );
-                            if (max && inG.length >= max) {
-                              const others = l.modifiers.filter(
-                                (s) => s.groupId !== g.id
-                              );
-                              const keep = inG.slice(1);
+                              }
                               return {
                                 ...l,
                                 modifiers: [
-                                  ...others,
-                                  ...keep,
+                                  ...l.modifiers,
                                   { groupId: g.id, optionId: op.id },
                                 ],
                               };
                             }
-                            return {
-                              ...l,
-                              modifiers: [
-                                ...l.modifiers,
-                                { groupId: g.id, optionId: op.id },
-                              ],
-                            };
-                          }
-                        });
-                      };
-                      return (
-                        <div
-                          key={g.id}
-                          className="rounded-xl border border-gray-200 p-3"
-                        >
-                          <div className="mb-1 flex items-center justify-between">
-                            <div className="text-sm font-semibold">
-                              {g.name}{" "}
-                              {g.type === "required" && (
-                                <span className="text-amber-700 text-xs">
-                                  (required)
-                                </span>
-                              )}
+                          });
+                        };
+                        return (
+                          <div
+                            key={g.id}
+                            className="rounded-xl border border-gray-200 p-3"
+                          >
+                            <div className="mb-1 flex items-center justify-between">
+                              <div className="text-sm font-semibold">
+                                {g.name}{" "}
+                                {g.type === "required" && (
+                                  <span className="text-amber-700 text-xs">
+                                    (required)
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-gray-500">
+                                {max ? `max ${max}` : "multi"}
+                              </div>
                             </div>
-                            <div className="text-[11px] text-gray-500">
-                              {max ? `max ${max}` : "multi"}
-                            </div>
-                          </div>
-                          <div className="space-y-1">
-                            {g.options.map((op) => {
-                              const picked = lineInGroup.some(
-                                (s) => s.optionId === op.id
-                              );
-                              return (
-                                <button
-                                  key={op.id}
-                                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
+                            <div className="space-y-1">
+                              {g.options.map((op) => {
+                                const picked = lineInGroup.some(
+                                  (s) => s.optionId === op.id
+                                );
+                                return (
+                                  <button
+                                    key={op.id}
+                                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                                 ${
                                   picked
                                     ? "border-orange-300 bg-orange-50"
                                     : "border-gray-200 bg-white hover:bg-gray-50"
                                 }`}
-                                  onClick={() => toggle(op)}
-                                >
-                                  <span className="flex items-center gap-2">
-                                    {picked ? (
-                                      <SquareCheck className="h-4 w-4 text-orange-600" />
-                                    ) : (
-                                      <Square className="h-4 w-4 text-gray-400" />
-                                    )}
-                                    {op.name}
-                                  </span>
-                                  <span className="text-gray-700">
-                                    {op.priceDelta
-                                      ? op.priceDelta > 0
-                                        ? `+${money(op.priceDelta)}`
-                                        : `${money(op.priceDelta)}`
-                                      : ""}
-                                  </span>
-                                </button>
-                              );
-                            })}
+                                    onClick={() => toggle(op)}
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      {picked ? (
+                                        <SquareCheck className="h-4 w-4 text-orange-600" />
+                                      ) : (
+                                        <Square className="h-4 w-4 text-gray-400" />
+                                      )}
+                                      {op.name}
+                                    </span>
+                                    <span className="text-gray-700">
+                                      {op.priceDelta
+                                        ? op.priceDelta > 0
+                                          ? `+${money(op.priceDelta)}`
+                                          : `${money(op.priceDelta)}`
+                                        : ""}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Note */}
               <div>
@@ -1475,11 +1540,13 @@ export default function POSPage() {
                     ${" "}
                     {money(
                       (editLine.basePrice +
-                        priceFromModifiers(
-                          menu.find((m) => m.id === editLine.itemId)
-                            ?.modifierGroups,
-                          editLine.modifiers
-                        )) *
+                        (USE_MODIFIERS
+                          ? priceFromModifiers(
+                              menu.find((m) => m.id === editLine.itemId)
+                                ?.modifierGroups,
+                              editLine.modifiers
+                            )
+                          : 0)) *
                         editLine.qty
                     )}
                   </div>
