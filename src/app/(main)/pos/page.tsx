@@ -213,9 +213,9 @@ export default function POSPage() {
   const [selectedCategory, setSelectedCategory] = useState<number>(0);
   const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
 
-  const [modifiers, setModifiers] = useState<{ id: number; name: string; price: number }[]>(
-    []
-  );
+  const [modifiers, setModifiers] = useState<
+    { id: number; name: string; price: number }[]
+  >([]);
 
   const loadModifiers = async () => {
     const res = await axios.get(
@@ -448,20 +448,6 @@ export default function POSPage() {
       status: "open",
     });
   };
-
-  /* -------------------- add item via modifiers dialog -------------------- */
-  // const addItemStart = (item: MenuItem) => {
-  //   setModItem(item);
-  //   // default selected = defaults from groups
-  //   const selected: AppliedModifier[] = [];
-  //   item.modifierGroups?.forEach((g) => {
-  //     g.options.forEach((op) => {
-  //       if (op.default) selected.push({ groupId: g.id, optionId: op.id });
-  //     });
-  //   });
-  //   setModSelected(selected);
-  //   setModQty(1);
-  // };
 
   const addItemStart = (item: MenuItem) => {
     setModItem(item);
@@ -789,15 +775,11 @@ export default function POSPage() {
           </div>
         </section>
 
-        {/* MIDDLE: Menu */}
         <section className="overflow-hidden rounded-3xl bg-white/80 p-4 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
-          {/* Search + Categories */}
-          {/* ======================== CATEGORY BAR ======================== */}
           <div className="mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {/* "All" category */}
             <button
               onClick={() => setSelectedCategory(0)}
-              className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
+              className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition
       ${
         selectedCategory === 0
           ? "bg-orange-500 text-white border-orange-500"
@@ -835,20 +817,22 @@ export default function POSPage() {
                 <button
                   key={item.id}
                   onClick={() => addItemStart(item)}
-                  className="flex h-28 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-orange-300 hover:bg-orange-50 transition"
+                  className="flex h-32 flex-col rounded-2xl border border-gray-200 bg-white p-3 text-left transition hover:border-orange-300 hover:bg-orange-50"
                 >
-                  <span className="line-clamp-2 text-sm font-semibold text-gray-900">
+                  <span className="line-clamp-2 text-sm font-semibold text-gray-900 leading-tight min-h-[38px]">
                     {item.name}
                   </span>
 
-                  <div className="flex justify-between text-sm">
-                    <span className="font-bold text-gray-900">
-                      {item.currency_code} {money(item.price)}
-                    </span>
-                    <span className="text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
-                      {item.categoryName}
-                    </span>
+                  <div className="flex-1"></div>
+                  <div className="text-sm font-bold text-gray-900">
+                    {item.currency_code} {money(item.price)}
                   </div>
+
+                  <span
+                    className="mt-1 inline-block max-w-[120px] truncate text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600"
+                  >
+                    {item.categoryName}
+                  </span>
                 </button>
               ))}
           </div>
