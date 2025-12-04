@@ -103,81 +103,6 @@ const KITCHEN_STATIONS: KitchenStation[] = [
   "Expo",
 ];
 
-const MODIFIERS: Record<string, ModifierGroup[]> = {
-  // by MenuItem.id
-  "pizza-margherita": [
-    {
-      id: "grp-size",
-      name: "Size",
-      type: "required",
-      minSelect: 1,
-      maxSelect: 1,
-      options: [
-        { id: "opt-s", name: "Small", priceDelta: 0, default: true },
-        { id: "opt-m", name: "Medium", priceDelta: 2 },
-        { id: "opt-l", name: "Large", priceDelta: 4 },
-      ],
-    },
-    {
-      id: "grp-extras",
-      name: "Extras",
-      type: "optional",
-      maxSelect: 4,
-      options: [
-        { id: "opt-mush", name: "Mushrooms", priceDelta: 1 },
-        { id: "opt-olives", name: "Olives", priceDelta: 0.5 },
-        { id: "opt-buf", name: "Buffalo Mozzarella", priceDelta: 2 },
-        { id: "opt-chilli", name: "Chilli Flakes", priceDelta: 0 },
-      ],
-    },
-    {
-      id: "grp-remove",
-      name: "Remove",
-      type: "optional",
-      maxSelect: 2,
-      options: [
-        { id: "opt-no-basil", name: "No Basil", priceDelta: 0 },
-        { id: "opt-light-sauce", name: "Light Sauce", priceDelta: 0 },
-      ],
-    },
-  ],
-  "shawarma-chicken": [
-    {
-      id: "grp-bread",
-      name: "Bread",
-      type: "required",
-      minSelect: 1,
-      maxSelect: 1,
-      options: [
-        { id: "opt-wrap", name: "Wrap", priceDelta: 0, default: true },
-        { id: "opt-plate", name: "Plate", priceDelta: 2 },
-      ],
-    },
-    {
-      id: "grp-sides",
-      name: "Sides",
-      type: "optional",
-      maxSelect: 3,
-      options: [
-        { id: "opt-fries", name: "Fries", priceDelta: 1 },
-        { id: "opt-salad", name: "Side Salad", priceDelta: 1.5 },
-        { id: "opt-pickle", name: "Extra Pickles", priceDelta: 0.5 },
-      ],
-    },
-    {
-      id: "grp-sauce",
-      name: "Sauces",
-      type: "optional",
-      maxSelect: 2,
-      options: [
-        { id: "opt-garlic", name: "Garlic", priceDelta: 0 },
-        { id: "opt-tahini", name: "Tahini", priceDelta: 0 },
-        { id: "opt-spicy", name: "Spicy", priceDelta: 0 },
-      ],
-    },
-  ],
-};
-
 /* =============================================================================
  * Helpers
  * ========================================================================== */
@@ -212,6 +137,11 @@ export default function POSPage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number>(0);
   const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
+  const [takeawayModalOpen, setTakeawayModalOpen] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+  const [takeawayCustomerId, setTakeawayCustomerId] = useState(0);
 
   const [modifiers, setModifiers] = useState<
     { id: number; name: string; price: number }[]
@@ -366,7 +296,7 @@ export default function POSPage() {
 
   // Tables & order
   const [tables, setTables] = useState<Table[]>([]);
-  const [currentTableId, setCurrentTableId] = useState<number | undefined>();
+  const [currentTableId, setCurrentTableId] = useState<number | null>(null);
   const [activeTables, setActiveTables] = useState<number[]>([]);
   const [order, setOrder] = useState<Order>({
     id: uid(),
@@ -575,7 +505,7 @@ export default function POSPage() {
   };
 
   const itemsForCurrentTable = useMemo(() => {
-    if (currentTableId) {
+    if (currentTableId !== null) {
       return order.items.filter((li) => li.tableId === currentTableId);
     }
     return order.items;
@@ -591,12 +521,16 @@ export default function POSPage() {
     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
   }, [ordersInfo]);
 
-  const saveOrderToDatabase = async () => {
-    const tableKey = currentTableId || 0;
+  const saveOrderToDatabase = async (customerInfo?: any) => {
+    const tableKey = currentTableId ?? 0; // null → 0
+    const isTakeaway = tableKey === 0;
+
     let orderData = ordersInfo.find((o) => o.tableId === tableKey);
     if (!orderData) {
       orderData = { tableId: tableKey, items: order.items };
     }
+
+    console.log("orders info ", ordersInfo);
 
     if (!orderData.items || orderData.items.length === 0) {
       return alert("No items to save");
@@ -611,7 +545,7 @@ export default function POSPage() {
       notes: li.note || "",
     }));
 
-    const orderType = currentTableId ? "dine_in" : "takeaway";
+    const orderType = isTakeaway ? "takeaway" : "dine_in";
 
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
@@ -623,12 +557,18 @@ export default function POSPage() {
       total: total,
       order_type: orderType,
       table_id: tableKey,
-      customer_id: 0,
-      delcustomername: "",
-      delcustomerphone: "",
-      delcustomeraddress: "",
+      customer_id: orderType === "takeaway" ? customerInfo?.id ?? 0 : 0,
+      delcustomername: orderType === "takeaway" ? customerInfo?.name ?? "" : "",
+      delcustomerphone:
+        orderType === "takeaway" ? customerInfo?.phone ?? "" : "",
+      delcustomeraddress:
+        orderType === "takeaway" ? customerInfo?.address ?? "" : "",
+
+      customer_type: orderType,
+
       order_items: JSON.stringify(formattedItems),
     };
+    console.log("PAYLOAD ", payload);
 
     const response = await axios.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
@@ -637,7 +577,11 @@ export default function POSPage() {
 
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
-    if (response.data.receipt_html) {
+    const shouldShowReceipt =
+      orderType === "dine_in" ||
+      (orderType === "takeaway" && customerName && customerPhone);
+
+    if (shouldShowReceipt && response.data.receipt_html) {
       setReceiptHTML(response.data.receipt_html);
     }
 
@@ -656,7 +600,10 @@ export default function POSPage() {
       status: "open",
     });
 
-    setCurrentTableId(undefined);
+    setCurrentTableId(null);
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerAddress("");
   };
 
   const printReceipt = () => {
@@ -702,7 +649,7 @@ export default function POSPage() {
   }, [ordersInfo]);
 
   const startNewOrder = () => {
-    setCurrentTableId(undefined);
+    setCurrentTableId(null);
     setOrder({
       id: uid(),
       guests: 0,
@@ -711,6 +658,9 @@ export default function POSPage() {
       status: "open",
     });
   };
+
+  console.log("takeaway modall ", takeawayModalOpen);
+  console.log("current table id ", currentTableId);
 
   /* -------------------- render -------------------- */
   return (
@@ -828,9 +778,7 @@ export default function POSPage() {
                     {item.currency_code} {money(item.price)}
                   </div>
 
-                  <span
-                    className="mt-1 inline-block max-w-[120px] truncate text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600"
-                  >
+                  <span className="mt-1 inline-block max-w-[120px] truncate text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
                     {item.categoryName}
                   </span>
                 </button>
@@ -1038,7 +986,23 @@ export default function POSPage() {
 
               <button
                 className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
-                onClick={saveOrderToDatabase}
+                onClick={() => {
+                  const tableKey = currentTableId ?? 0;
+                  const isTakeaway = tableKey === 0;
+
+                  // For takeaway → if we don't have name / phone yet → open modal
+                  if (isTakeaway && (!customerName || !customerPhone)) {
+                    setTakeawayModalOpen(true);
+                    return;
+                  }
+
+                  // We already have data → save directly
+                  saveOrderToDatabase({
+                    name: customerName,
+                    phone: customerPhone,
+                    address: customerAddress,
+                  });
+                }}
               >
                 Pay & Close
               </button>
@@ -1285,6 +1249,128 @@ export default function POSPage() {
                 Print
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {takeawayModalOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl overflow-hidden">
+            {/* HEADER */}
+            <div className="flex items-center justify-between border-b px-6 py-3">
+              <h2 className="text-lg font-bold text-gray-900">
+                Takeaway Customer Info
+              </h2>
+              <button
+                onClick={() => setTakeawayModalOpen(false)}
+                className="rounded-lg p-1 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* FORM */}
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+
+                if (!customerName || !customerPhone) {
+                  return alert("Name and phone are required!");
+                }
+
+                // 1) Check if customer exists
+                const res = await axios.get(
+                  process.env.NEXT_PUBLIC_API_LINK +
+                    "/request/api/findcustomer",
+                  {
+                    params: {
+                      name: customerName,
+                      phone: customerPhone,
+                    },
+                  }
+                );
+
+                let customerId = 0;
+
+                if (res.data.exists) {
+                  customerId = res.data.customer_id;
+                }
+
+                setTakeawayCustomerId(customerId);
+
+                // 2) Close modal
+                setTakeawayModalOpen(false);
+
+                // 3) Save order with correct customer ID
+                saveOrderToDatabase({
+                  id: customerId,
+                  name: customerName,
+                  phone: customerPhone,
+                  address: customerAddress,
+                });
+              }}
+            >
+              <div className="p-6 space-y-4">
+                {/* Customer Name */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">
+                    Customer Name
+                  </label>
+                  <input
+                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="John Doe"
+                    required
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">
+                    Customer Phone
+                  </label>
+                  <input
+                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    placeholder="03 123 456"
+                    required
+                  />
+                </div>
+
+                {/* Address */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">
+                    Address
+                  </label>
+                  <input
+                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    value={customerAddress}
+                    onChange={(e) => setCustomerAddress(e.target.value)}
+                    placeholder="Street / Building / Floor"
+                  />
+                </div>
+              </div>
+
+              {/* FOOTER */}
+              <div className="border-t px-6 py-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTakeawayModalOpen(false)}
+                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                >
+                  Save & Continue
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
