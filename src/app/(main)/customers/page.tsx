@@ -1,18 +1,20 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import {
-  Search, Filter, Plus, Pencil, X, CheckCircle2, Phone, Mail, MapPin, User, Users2, Building2, Trash2
-} from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Search, Filter, Plus, X, CheckCircle2 } from "lucide-react";
+import CustomerCard from "@/components/shared/customer-card";
+import axios from "axios";
 
 /* ─────────────────────────────────────────
  * Types
  * ───────────────────────────────────────── */
-type UID = string;
+type UID = number;
 type CustomerType = "Dine-in" | "Takeaway" | "Delivery";
 
 type Customer = {
   id: UID;
+  accountNumber?: number;
+  customerCode?: number;
   name: string;
   phone?: string;
   email?: string;
@@ -20,56 +22,197 @@ type Customer = {
   type: CustomerType;
   company?: string;
   loyaltyPoints?: number;
-  active: boolean;
+  active: number;
+  website: string;
+  hobbies: string;
+  birthDate: string;
+  favoriteFoods?: string;
+  workTitle?: string;
+  sports?: string;
 };
-
-const uid = () => Math.random().toString(36).slice(2, 9);
-
-/* Mock Data */
-const MOCK: Customer[] = [
-  { id: uid(), name: "John Doe", phone: "0321 456 789", email: "john@example.com", address: "Beirut Downtown", type: "Delivery", loyaltyPoints: 120, active: true },
-  { id: uid(), name: "Sara Haddad", phone: "0344 555 777", email: "sara@workmail.com", type: "Dine-in", active: true },
-  { id: uid(), name: "Ahmad Khalil", phone: "0377 999 111", address: "Hamra, Beirut", type: "Takeaway", company: "Khalil Bros", active: true },
-  { id: uid(), name: "Rami Abbas", phone: "0399 101 222", email: "rami@outlook.com", address: "Tripoli", type: "Delivery", active: false },
-];
 
 /* ─────────────────────────────────────────
  * Page
  * ───────────────────────────────────────── */
 export default function POSCustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>(MOCK);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  //filter 7asab type of customer
   const [filter, setFilter] = useState<"All" | CustomerType>("All");
   const [search, setSearch] = useState("");
-  const [drawer, setDrawer] = useState<{ open: boolean; customer?: Customer | null }>({ open: false });
+  const [drawer, setDrawer] = useState<{
+    open: boolean;
+    customer?: Customer | null;
+  }>({ open: false });
 
-  const filtered = useMemo(() => {
-    const t = search.trim().toLowerCase();
-    return customers.filter(c => {
-      const txt = !t || c.name.toLowerCase().includes(t) || (c.phone || "").includes(t) || (c.email || "").toLowerCase().includes(t);
-      const f = filter === "All" || c.type === filter;
-      return txt && f;
-    });
-  }, [customers, filter, search]);
+  const getCustomers = async () => {
+    try {
+      const { data } = await axios.get(
+        process.env.NEXT_PUBLIC_API_LINK + "/request/api/listcustomers",
+        {
+          params: {
+            user_id: localStorage.getItem("user_id"),
+            g_hash: localStorage.getItem("g_hash"),
+            searchquery: search,
+            customer_type: filter === "All" ? "" : filter.toLowerCase(),
+            current_page: 1,
+          },
+        }
+      );
 
-  const startNew = () =>
-    setDrawer({
-      open: true,
-      customer: { id: uid(), name: "", type: "Dine-in", active: true },
-    });
+      if (data.is_error === 1) return;
 
-  const startEdit = (c: Customer) =>
-    setDrawer({ open: true, customer: { ...c } });
+      const mapped = data.customers_array.map((c: any) => ({
+        id: c.ic_id,
+        name: c.ic_customer_name,
+        email: c.ic_customer_email,
+        phone: c.ic_customer_phone,
+        address: c.ic_customer_address,
+        type:
+          c.ic_customer_type === "dine_in"
+            ? "Dine-in"
+            : c.ic_customer_type === "takeaway"
+            ? "Takeaway"
+            : "Delivery",
+        company: "",
+        loyaltyPoints: c.ic_loyality_point ?? 0,
+        active: c.ic_is_active === 1 ? 1 : 0,
+        website: c.ic_customer_website,
+        hobbies: c.ic_hobbies,
+        birthDate: c.ic_birth_date,
+        // favoriteFoods: c.ic_favorite_foods,
+        // workTitle: c.ic_work_title,
+        // sports: c.ic_sports,
+      }));
 
-  const saveCustomer = (c: Customer) => {
-    setCustomers(arr => {
-      const exist = arr.some(x => x.id === c.id);
-      return exist ? arr.map(x => (x.id === c.id ? c : x)) : [c, ...arr];
-    });
-    setDrawer({ open: false, customer: null });
+      setCustomers(mapped);
+    } catch (err) {
+      console.log(err);
+    }
   };
 
-  const deleteCustomer = (id: string) =>
-    setCustomers(arr => arr.filter(x => x.id !== id));
+  useEffect(() => {
+    getCustomers();
+  }, [filter, search]);
+
+  // treka mtl ma heye
+  const startNew = () => {
+    setDrawer({
+      open: true,
+      customer: {
+        id: 0,
+        name: "",
+        phone: "",
+        email: "",
+        address: "",
+        type: "Dine-in",
+        company: "",
+        loyaltyPoints: 0,
+        active: 1,
+        website: "",
+        hobbies: "",
+        birthDate: "",
+        favoriteFoods: "",
+        workTitle: "",
+        sports: "",
+      },
+    });
+  };
+
+  // here should get the customer using api
+  const startEdit = async (c: Customer) => {
+    try {
+      const { data } = await axios.get(
+        process.env.NEXT_PUBLIC_API_LINK + "/request/api/getcustomerinfo",
+        {
+          params: {
+            user_id: localStorage.getItem("user_id"),
+            g_hash: localStorage.getItem("g_hash"),
+            customer_id: c.id,
+          },
+        }
+      );
+
+      if (data.is_error === 1) return;
+
+      const info = data.customer_info;
+
+      const mapped: Customer = {
+        id: info.ic_id,
+        name: info.ic_customer_name,
+        email: info.ic_customer_email,
+        phone: info.ic_customer_phone,
+        address: info.ic_customer_address,
+        type:
+          info.ic_customer_type === "dine_in"
+            ? "Dine-in"
+            : info.ic_customer_type === "takeaway"
+            ? "Takeaway"
+            : "Delivery",
+        company: "",
+        loyaltyPoints: info.ic_loyality_point ?? 0,
+        active: info.ic_is_active === 1 ? 1 : 0,
+        website: info.ic_customer_website,
+        hobbies: info.ic_hobbies,
+        birthDate: info.ic_birth_date,
+        // favoriteFoods: info.ic_favorite_foods,
+        // workTitle: info.ic_work_title,
+        // sports: info.ic_sports,
+      };
+
+      setDrawer({ open: true, customer: mapped });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const saveCustomer = async (c: Customer) => {
+    await axios.post(
+      process.env.NEXT_PUBLIC_API_LINK + "/request/api/savecustomer",
+      {
+        user_id: localStorage.getItem("user_id"),
+        g_hash: localStorage.getItem("g_hash"),
+
+        customer_id: c.id,
+        ic_customer_name: c.name,
+        ic_customer_address: c.address,
+        ic_customer_email: c.email,
+        ic_customer_website: c.website,
+        ic_customer_phone: c.phone,
+        ic_customer_mobile: c.phone,
+        ic_hobbies: c.hobbies,
+        ic_birth_date: c.birthDate,
+        // ic_favorite_foods: c.favoriteFoods,
+        // ic_work_title: c.workTitle,
+        // ic_sports: c.sports,
+        ic_is_active: c.active,
+        ic_customer_type:
+          c.type === "Dine-in"
+            ? "dine_in"
+            : c.type === "Takeaway"
+            ? "takeaway"
+            : "delivery",
+        ic_loyality_point: c.loyaltyPoints,
+      }
+    );
+
+    setDrawer({ open: false, customer: null });
+
+    // reload
+    getCustomers();
+  };
+
+  const deleteCustomer = async (id: number) => {
+    await axios.post(
+      process.env.NEXT_PUBLIC_API_LINK + "/request/api/deletecustomers",
+      {
+        user_id: localStorage.getItem("user_id"),
+        g_hash: localStorage.getItem("g_hash"),
+        customer_id: id,
+      }
+    );
+
+    setCustomers((prev) => prev.filter((c) => c.id !== id));
+  };
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
@@ -101,7 +244,7 @@ export default function POSCustomersPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, phone, email..."
+                placeholder="Search by name..."
                 className="w-80 rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
               />
             </div>
@@ -122,82 +265,16 @@ export default function POSCustomersPage() {
 
         {/* Customer Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((c) => (
-            <div
+          {customers.map((c) => (
+            <CustomerCard
               key={c.id}
-              className="overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl ring-1 ring-white/60 shadow-sm p-4 flex flex-col justify-between"
-            >
-              <div className="space-y-2">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="text-base font-extrabold text-gray-900 flex items-center gap-1">
-                      <User className="h-4 w-4 text-gray-500" /> {c.name}
-                    </div>
-                    <div className="text-xs text-gray-500">{c.type}</div>
-                  </div>
-                  <button
-                    onClick={() => startEdit(c)}
-                    className="rounded-lg border border-gray-200 bg-white p-1 text-xs hover:bg-gray-50"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-1 text-sm text-gray-700">
-                  {c.phone && (
-                    <div className="flex items-center gap-1">
-                      <Phone className="h-4 w-4 text-gray-400" />
-                      {c.phone}
-                    </div>
-                  )}
-                  {c.email && (
-                    <div className="flex items-center gap-1">
-                      <Mail className="h-4 w-4 text-gray-400" />
-                      {c.email}
-                    </div>
-                  )}
-                  {c.address && (
-                    <div className="flex items-center gap-1">
-                      <MapPin className="h-4 w-4 text-gray-400" />
-                      <span className="truncate">{c.address}</span>
-                    </div>
-                  )}
-                </div>
-
-                {c.company && (
-                  <div className="flex items-center gap-1 text-xs text-gray-600">
-                    <Building2 className="h-3.5 w-3.5 text-gray-400" /> {c.company}
-                  </div>
-                )}
-
-                {c.loyaltyPoints !== undefined && (
-                  <div className="mt-1 text-[11px] font-semibold text-orange-600">
-                    {c.loyaltyPoints} pts
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3 flex items-center justify-between">
-                <div
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${
-                    c.active
-                      ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                      : "bg-gray-50 text-gray-600 ring-gray-200"
-                  }`}
-                >
-                  {c.active ? "Active" : "Inactive"}
-                </div>
-                <button
-                  onClick={() => deleteCustomer(c.id)}
-                  className="rounded-lg border border-gray-200 bg-white p-1 text-xs hover:bg-gray-50"
-                >
-                  <Trash2 className="h-4 w-4 text-gray-500" />
-                </button>
-              </div>
-            </div>
+              customer={c}
+              startEdit={startEdit}
+              deleteCustomer={deleteCustomer}
+            />
           ))}
 
-          {filtered.length === 0 && (
+          {customers.length === 0 && (
             <div className="col-span-full grid h-48 place-items-center rounded-3xl border border-dashed border-gray-200 bg-white/60 text-sm text-gray-500">
               No customers found…
             </div>
@@ -205,7 +282,8 @@ export default function POSCustomersPage() {
         </div>
 
         <p className="text-center text-xs text-gray-500 pt-6">
-          © {new Date().getFullYear()} <span className="font-semibold">TitanPOS®</span> — F&B Customers
+          © {new Date().getFullYear()}{" "}
+          <span className="font-semibold">TitanPOS®</span> — F&B Customers
         </p>
       </div>
 
@@ -233,8 +311,10 @@ function CustomerDrawer({
   onClose: () => void;
   onSave: (c: Customer) => void;
 }) {
-  const [form, setForm] = useState<Customer>({ ...customer });
-  const set = (p: Partial<Customer>) => setForm((f) => ({ ...f, ...p }));
+  const [form, setForm] = useState<Customer>(() => ({ ...customer }));
+
+  const set = (patch: Partial<Customer>) =>
+    setForm((prev) => ({ ...prev, ...patch }));
 
   const canSave = form.name.trim().length > 0;
 
@@ -333,7 +413,7 @@ function CustomerDrawer({
             <input
               type="checkbox"
               checked={!!form.active}
-              onChange={(e) => set({ active: e.target.checked })}
+              onChange={(e) => set({ active: e.target.checked ? 1 : 0 })}
             />
             Active Customer
           </label>
