@@ -142,10 +142,17 @@ export default function POSPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [takeawayCustomerId, setTakeawayCustomerId] = useState(0);
-const [selectedCustomer, setSelectedCustomer] = useState<any>(null); 
-const [customerResults, setcustomerResults] = useState<any>([]);
-const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [customerResults, setCustomerResults] = useState<any>([]);
+  const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
 
+  const [previewPopupOpen, setPreviewPopupOpen] = useState(false);
+  const [previewTotals, setPreviewTotals] = useState({
+    subtotal: 0,
+    total: 0,
+    discount: 0,
+  });
 
   const [modifiers, setModifiers] = useState<
     { id: number; name: string; price: number }[]
@@ -161,8 +168,6 @@ const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
         },
       }
     );
-
-    console.log(" result  ", res);
 
     if (res.data.is_error === 1) return;
 
@@ -347,6 +352,9 @@ const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
   const [modQty, setModQty] = useState(1);
   const [editLine, setEditLine] = useState<OrderItem | null>(null);
   const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
+  const [takeawayPreview, setTakeawayPreview] = useState(false);
+  const [customerType, setCustomerType] = useState("takeaway");
+  const [paymentType, setPaymentType] = useState("");
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -525,16 +533,16 @@ const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
   }, [ordersInfo]);
 
-  const saveOrderToDatabase = async (customerInfo?: any) => {
-    const tableKey = currentTableId ?? 0; // null → 0
+  const saveOrderToDatabase = async (finalCustomerId?: number) => {
+    const tableKey = currentTableId ? Number(currentTableId) : 0;
     const isTakeaway = tableKey === 0;
 
-    let orderData = ordersInfo && ordersInfo.find((o) => o.tableId === tableKey);
+    const orderType = isTakeaway ? "takeaway" : "dine_in";
+
+    let orderData = ordersInfo.find((o) => o.tableId === tableKey);
     if (!orderData) {
       orderData = { tableId: tableKey, items: order.items };
     }
-
-    console.log("orders info ", ordersInfo);
 
     if (!orderData.items || orderData.items.length === 0) {
       return alert("No items to save");
@@ -547,30 +555,63 @@ const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
       discount: 0,
       station_id: 1,
       notes: li.note || "",
+      modifiers: li.modifiers.map((m) => ({
+        group_id: m.groupId,
+        option_id: m.optionId,
+        name:
+          menu
+            .find((it) => it.id === li.itemId)
+            ?.modifierGroups?.find((g) => g.id === m.groupId)
+            ?.options.find((o) => o.id === m.optionId)?.name || "",
+        price:
+          menu
+            .find((it) => it.id === li.itemId)
+            ?.modifierGroups?.find((g) => g.id === m.groupId)
+            ?.options.find((o) => o.id === m.optionId)?.priceDelta || 0,
+      })),
     }));
 
-    const orderType = isTakeaway ? "takeaway" : "dine_in";
+    let customer_id = 0;
+    let delName = "";
+    let delPhone = "";
+    let delAddress = "";
+
+    if (isTakeaway) {
+      // If customer selected from search
+      if (selectedCustomer) {
+        customer_id = selectedCustomer.customer_id;
+        delName = selectedCustomer.customer_name ?? "";
+        delPhone = selectedCustomer.customer_mobile ?? "";
+        delAddress = selectedCustomer.customer_address ?? "";
+      }
+
+      // If newly entered
+      if (customerName?.trim()) delName = customerName.trim();
+      if (customerPhone?.trim()) delPhone = customerPhone.trim();
+      if (customerAddress?.trim()) delAddress = customerAddress.trim();
+    }
 
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
       store_id: localStorage.getItem("store_id"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
+
+      order_type: orderType,
+      table_id: tableKey,
+
+      customer_id: finalCustomerId ?? customer_id,
+      delcustomername: delName,
+      delcustomerphone: delPhone,
+      delcustomeraddress: delAddress,
+
+      customer_type: customerType,
+
       sub_total: subtotal,
       discount: 0,
       total: total,
-      order_type: orderType,
-      table_id: tableKey,
-      customer_id: selectedCustomer?.id ?? 0,
-delcustomername: selectedCustomer?.name ?? "",
-delcustomerphone: selectedCustomer?.phone ?? "",
-delcustomeraddress: selectedCustomer?.address ?? "",
-
-      customer_type: orderType,
-
       order_items: JSON.stringify(formattedItems),
     };
-    console.log("PAYLOAD ", payload);
 
     const response = await axios.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
@@ -579,21 +620,15 @@ delcustomeraddress: selectedCustomer?.address ?? "",
 
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
-    const shouldShowReceipt =
-      orderType === "dine_in" ||
-      (orderType === "takeaway" && customerName && customerPhone);
-
-    if (shouldShowReceipt && response.data.receipt_html) {
+    if (response.data.receipt_html) {
       setReceiptHTML(response.data.receipt_html);
     }
 
-    alert("Order saved!");
+    const remaining = ordersInfo.filter((o) => o.tableId !== tableKey);
+    setOrdersInfo(remaining);
+    localStorage.setItem("orders_info", JSON.stringify(remaining));
 
-    // Remove only items for this table OR takeaway
-    const left = ordersInfo && ordersInfo.filter((o) => o.tableId !== tableKey);
-    setOrdersInfo(left);
-    saveOrdersInfo(left);
-
+    // Reset UI
     setOrder({
       id: uid(),
       guests: 0,
@@ -603,6 +638,7 @@ delcustomeraddress: selectedCustomer?.address ?? "",
     });
 
     setCurrentTableId(null);
+    setSelectedCustomer(null);
     setCustomerName("");
     setCustomerPhone("");
     setCustomerAddress("");
@@ -643,7 +679,11 @@ delcustomeraddress: selectedCustomer?.address ?? "",
 
   // Recalculate active tables any time ordersInfo changes
   useEffect(() => {
-    const actives = ordersInfo && ordersInfo.filter((o) => o.tableId && o.items && o.items.length > 0).map((o) => o.tableId);
+    const actives =
+      ordersInfo &&
+      ordersInfo
+        .filter((o) => o.tableId && o.items && o.items.length > 0)
+        .map((o) => o.tableId);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
@@ -658,9 +698,6 @@ delcustomeraddress: selectedCustomer?.address ?? "",
       status: "open",
     });
   };
-
-  console.log("takeaway modall ", takeawayModalOpen);
-  console.log("current table id ", currentTableId);
 
   /* -------------------- render -------------------- */
   return (
@@ -928,10 +965,10 @@ delcustomeraddress: selectedCustomer?.address ?? "",
 
                         <div className="text-right">
                           <div className="text-sm font-extrabold text-gray-900">
-                            $ {money(lineTotal)}
+                            {CurrencySymbol} {money(lineTotal)}
                           </div>
                           <div className="text-xs text-gray-500">
-                            ${money(li.basePrice)} base
+                            {CurrencySymbol} {money(li.basePrice)} base
                             {li.priceExtra
                               ? ` + ${money(li.priceExtra)} opts`
                               : ""}
@@ -944,20 +981,22 @@ delcustomeraddress: selectedCustomer?.address ?? "",
               </ul>
             )}
           </div>
-<div className="flex items-center justify-between border-b px-4 py-2">
-  <div className="text-xs text-gray-500">
-    {currentTableId ? "Dine-In Order" : "Takeaway Order"}
-  </div>
+          <div className="flex items-center justify-between border-b px-4 py-2">
+            <div className="text-xs text-gray-500">
+              {currentTableId ? "Dine-In Order" : "Takeaway Order"}
+            </div>
 
-  {!currentTableId && (
-    <button 
-      onClick={() => setCustomerDrawerOpen(true)} 
-      className="text-orange-600 text-sm font-semibold hover:underline"
-    >
-      {selectedCustomer ? selectedCustomer.name : "Add Customer"}
-    </button>
-  )}
-</div>
+            {!currentTableId && (
+              <button
+                onClick={() => setCustomerDrawerOpen(true)}
+                className="text-orange-600 text-sm font-semibold hover:underline"
+              >
+                {selectedCustomer
+                  ? selectedCustomer.customer_name
+                  : "Add Customer"}
+              </button>
+            )}
+          </div>
 
           {/* Totals + Actions */}
           <div className="border-t border-white/60 p-4">
@@ -965,19 +1004,19 @@ delcustomeraddress: selectedCustomer?.address ?? "",
               <div className="flex justify-between">
                 <span className="text-gray-600">Subtotal</span>
                 <span className="font-semibold text-gray-900">
-                  $ {money(subtotal)}
+                  {CurrencySymbol} {money(subtotal)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Tax (11%)</span>
                 <span className="font-semibold text-gray-900">
-                  $ {money(tax)}
+                  {CurrencySymbol} {money(tax)}
                 </span>
               </div>
               <div className="flex justify-between text-lg">
                 <span className="font-bold text-gray-800">Total</span>
                 <span className="font-extrabold text-gray-900">
-                  $ {money(total)}
+                  {CurrencySymbol} {money(total)}
                 </span>
               </div>
             </div>
@@ -1001,22 +1040,26 @@ delcustomeraddress: selectedCustomer?.address ?? "",
               <button
                 className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
                 onClick={() => {
-  const tableKey = currentTableId ?? 0;
+                  const tableKey = currentTableId ?? 0;
 
-  // 1) Takeaway → must select customer
-  if (tableKey === 0 && !selectedCustomer) {
-    return setCustomerDrawerOpen(true);
-  }
+                  if (tableKey === 0 && !selectedCustomer && !customerName) {
+                    setCustomerDrawerOpen(true);
+                    setTakeawayPreview(true);
+                  }
 
-  // 2) Continue saving
-  saveOrderToDatabase({
-    id: selectedCustomer?.id ?? 0,
-    name: selectedCustomer?.name ?? "",
-    phone: selectedCustomer?.phone ?? "",
-    address: selectedCustomer?.address ?? "",
-  });
-}}
+                  if (tableKey === 0) {
+                    setCustomerDrawerOpen(true);
+                    return;
+                  }
 
+                  setPreviewTotals({
+                    subtotal,
+                    total,
+                    discount: 0,
+                  });
+
+                  setPreviewPopupOpen(true);
+                }}
               >
                 Pay & Close
               </button>
@@ -1268,126 +1311,467 @@ delcustomeraddress: selectedCustomer?.address ?? "",
       )}
 
       {customerDrawerOpen && (
-  <div className="fixed inset-0 z-50 flex">
-
-    {/* BACKDROP */}
-    <div
-      className="flex-1 bg-black/30"
-      onClick={() => setCustomerDrawerOpen(false)}
-    />
-
-    {/* DRAWER */}
-    <div className="w-full max-w-md bg-white shadow-2xl overflow-auto">
-
-      {/* HEADER */}
-      <div className="px-5 py-4 border-b flex justify-between items-center">
-        <h2 className="text-lg font-bold text-gray-900">Takeaway Customer</h2>
-        <button
-          onClick={() => setCustomerDrawerOpen(false)}
-          className="p-1 rounded-lg hover:bg-gray-100"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="p-5 space-y-4">
-
-        {/* Search Field */}
-        <div>
-          <label className="font-semibold text-sm text-gray-700">Search</label>
-          <input
-            className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-            placeholder="Search customer by name or phone..."
-            onChange={async (e) => {
-              const q = e.target.value;
-              if (q.length < 2) return;
-              const res = await axios.get(process.env.NEXT_PUBLIC_API_LINK + "/request/api/searchcustomer", {
-                params: { q }
-              });
-              setCustomerResults(res.data.results || []);
-            }}
+        <div className="fixed inset-0 z-50 flex">
+          {/* BACKDROP */}
+          <div
+            className="flex-1 bg-black/30"
+            onClick={() => setCustomerDrawerOpen(false)}
           />
-        </div>
 
-        {/* Results */}
-        {customerResults?.length > 0 && (
-          <div className="space-y-2">
-            {customerResults.map((c: any) => (
+          {/* DRAWER */}
+          <div className="w-full max-w-md bg-white shadow-2xl overflow-auto">
+            {/* HEADER */}
+            <div className="px-5 py-4 border-b flex justify-between items-center">
+              <h2 className="text-lg font-bold text-gray-900">
+                Takeaway Customer
+              </h2>
               <button
-                key={c.id}
-                onClick={() => {
-                  setSelectedCustomer(c);
-                  setCustomerDrawerOpen(false);
-                }}
-                className="w-full text-left px-4 py-2 rounded-xl border bg-white hover:bg-orange-50"
+                onClick={() => setCustomerDrawerOpen(false)}
+                className="p-1 rounded-lg hover:bg-gray-100"
               >
-                <div className="font-semibold">{c.name}</div>
-                <div className="text-xs text-gray-500">{c.phone}</div>
+                <X className="w-5 h-5" />
               </button>
-            ))}
+            </div>
+
+            <div className="p-5 space-y-4">
+              {takeawayPreview && (
+                <div className="mt-6 rounded-2xl border border-orange-300 bg-orange-50 p-4">
+                  <h3 className="text-lg font-bold mb-3">
+                    Takeaway Order Preview
+                  </h3>
+
+                  {/* Items */}
+                  <div className="space-y-2 text-sm">
+                    {order.items.map((li) => (
+                      <div key={li.uid} className="space-y-1 border-b pb-2">
+                        <div className="flex justify-between">
+                          <span>
+                            {li.name} × {li.qty}
+                          </span>
+                          <span>
+                            {money((li.basePrice + li.priceExtra) * li.qty)}
+                          </span>
+                        </div>
+
+                        {/* Show modifiers */}
+                        {li.modifiers.length > 0 && (
+                          <div className="text-xs text-gray-600 ml-2">
+                            {li.modifiers
+                              .map((m) => {
+                                const item = menu.find(
+                                  (x) => x.id === li.itemId
+                                );
+                                const g = item?.modifierGroups?.find(
+                                  (gg) => gg.id === m.groupId
+                                );
+                                const o = g?.options.find(
+                                  (oo) => oo.id === m.optionId
+                                );
+                                return `${o?.name} (${money(
+                                  o?.priceDelta || 0
+                                )})`;
+                              })
+                              .join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Totals */}
+                  <div className="mt-4 space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Subtotal</span>
+                      <span className="font-semibold">{money(subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Tax</span>
+                      <span className="font-semibold">{money(tax)}</span>
+                    </div>
+                    <div className="flex justify-between text-lg">
+                      <span className="font-bold">Total</span>
+                      <span className="font-extrabold">{money(total)}</span>
+                    </div>
+                  </div>
+
+                  {/* Customer info */}
+                  {selectedCustomer && (
+                    <div className="mt-4 text-sm">
+                      <div className="font-semibold">Customer</div>
+                      <div>{selectedCustomer.customer_name}</div>
+                      <div className="text-gray-600">
+                        {selectedCustomer.customer_mobile}
+                      </div>
+                      <div className="text-gray-600">
+                        {selectedCustomer.customer_address}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Buttons */}
+                  <div className="mt-4">
+                    <label className="text-sm font-semibold text-gray-700">
+                      Payment Type
+                    </label>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => setPaymentType("cash")}
+                        className={`px-4 py-2 rounded-xl border text-sm font-semibold 
+        ${
+          paymentType === "cash"
+            ? "bg-orange-500 text-white border-orange-500"
+            : "bg-white border-gray-300"
+        }
+      `}
+                      >
+                        Cash
+                      </button>
+
+                      <button
+                        onClick={() => setPaymentType("card")}
+                        className={`px-4 py-2 rounded-xl border text-sm font-semibold 
+        ${
+          paymentType === "card"
+            ? "bg-orange-500 text-white border-orange-500"
+            : "bg-white border-gray-300"
+        }
+      `}
+                      >
+                        Card
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Search Field */}
+              <div>
+                <label className="font-semibold text-sm text-gray-700">
+                  Search
+                </label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Search customer by name or phone..."
+                  onChange={async (e) => {
+                    const q = e.target.value.trim();
+                    if (q.length < 2) {
+                      setCustomerResults([]);
+                      return;
+                    }
+
+                    const res = await axios.get(
+                      process.env.NEXT_PUBLIC_API_LINK +
+                        "/request/api/searchcustomerbyname",
+                      { params: { sc_customer_name: q } }
+                    );
+
+                    // If API returns error → reset UI safely
+                    if (
+                      !res.data ||
+                      res.data.is_error === 1 ||
+                      !res.data.customer_data
+                    ) {
+                      setCustomerResults([]);
+                      return;
+                    }
+
+                    // Backend still returns encoded JSON → decode it
+                    const c = res.data.customer_data;
+
+                    setCustomerResults([c]);
+                    setCustomerName(c.customer_name || "");
+                    setCustomerPhone(c.customer_mobile || "");
+                    setCustomerAddress(c.customer_address || "");
+                  }}
+                />
+              </div>
+
+              {/* Results */}
+              {customerResults?.length > 0 && (
+                <div className="space-y-2">
+                  {customerResults.map((c: any) => {
+                    const isSelected =
+                      selectedCustomer?.customer_id === c.customer_id;
+
+                    return (
+                      <button
+                        key={c.customer_id}
+                        onClick={() => {
+                          setSelectedCustomer(c);
+                          setShowNewCustomer(false);
+
+                          setCustomerName("");
+                          setCustomerPhone("");
+                          setCustomerAddress("");
+                        }}
+                        className={`w-full text-left px-4 py-2 rounded-xl border transition 
+            ${
+              isSelected
+                ? "bg-orange-100 border-orange-500 shadow-sm"
+                : "bg-white hover:bg-orange-50 border-gray-200"
+            }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <div className="font-semibold">
+                              {c.customer_name}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {c.customer_mobile}
+                            </div>
+                          </div>
+
+                          {isSelected && (
+                            <span className="text-orange-600 font-bold text-sm">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <hr className="my-4" />
+
+              <div>
+                <label className="text-sm font-semibold text-gray-700">
+                  Order Type
+                </label>
+                <select
+                  className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                  value={customerType}
+                  onChange={(e) => setCustomerType(e.target.value)}
+                >
+                  <option value="takeaway">Takeaway</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+              </div>
+
+              {/* Toggle: create new customer */}
+              {/* Accordion Title */}
+              <button
+                onClick={() => setShowNewCustomer(!showNewCustomer)}
+                className="w-full flex justify-between items-center px-4 py-3 rounded-xl border text-sm font-semibold bg-white hover:bg-gray-50"
+              >
+                Add New Customer
+                <span className="text-gray-500">
+                  {showNewCustomer ? "▲" : "▼"}
+                </span>
+              </button>
+
+              {/* Accordion Content */}
+              {showNewCustomer && (
+                <div className="mt-3 space-y-3 border rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-gray-800">
+                    New Customer
+                  </h3>
+
+                  <input
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    placeholder="Customer Name"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                  />
+
+                  <input
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    placeholder="Phone Number"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                  />
+
+                  <input
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    placeholder="Address"
+                    value={customerAddress}
+                    onChange={(e) => setCustomerAddress(e.target.value)}
+                  />
+
+                  {/* <button
+      className="w-full bg-gradient-to-r from-orange-500 to-amber-400 text-white rounded-xl px-4 py-2 font-semibold shadow hover:brightness-105"
+    >
+      Save Customer
+    </button> */}
+                </div>
+              )}
+
+              {/* NEW CUSTOMER FORM */}
+
+              <button
+                disabled={!selectedCustomer && !showNewCustomer}
+                className={`w-full mt-4 px-4 py-3 text-sm font-semibold rounded-xl 
+    ${
+      !selectedCustomer && !showNewCustomer
+        ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+        : "bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-lg"
+    }`}
+                onClick={async () => {
+                  let finalCustomerId = null;
+
+                  if (selectedCustomer && !showNewCustomer) {
+                    finalCustomerId = selectedCustomer.customer_id;
+                  } else if (showNewCustomer) {
+                    // Require name + phone
+                    if (!customerName || !customerPhone) {
+                      return alert("Name and phone are required!");
+                    }
+
+                    const payload = {
+                      g_hash: localStorage.getItem("g_hash"),
+                      user_id: localStorage.getItem("user_id"),
+
+                      customer_id: 0,
+                      ic_customer_name: customerName,
+                      ic_customer_address: customerAddress,
+                      ic_customer_phone: customerPhone,
+                      ic_customer_mobile: customerPhone,
+
+                      ic_customer_email: "",
+                      ic_customer_website: "",
+                      ic_hobbies: "",
+                      ic_birth_date: "",
+                      ic_is_active: 1,
+                      ic_customer_type: "takeaway",
+                      ic_loyality_point: 0,
+                    };
+
+                    const res = await axios.post(
+                      process.env.NEXT_PUBLIC_API_LINK +
+                        "/request/api/savecustomer",
+                      payload
+                    );
+
+                    if (res.data.is_error) {
+                      return alert(res.data.error_message);
+                    }
+
+                    // Set newly created customer
+                    finalCustomerId = res.data.customer_id;
+
+                    setSelectedCustomer({
+                      customer_id: finalCustomerId,
+                      customer_name: customerName,
+                      customer_mobile: customerPhone,
+                      customer_address: customerAddress,
+                    });
+                  }
+
+                  if (!finalCustomerId) {
+                    return alert("Customer is missing!");
+                  }
+
+                  setCustomerDrawerOpen(false);
+
+                  // Pass finalCustomerId to your order-saving function
+                  await saveOrderToDatabase(finalCustomerId);
+                }}
+              >
+                Pay & Close
+              </button>
+            </div>
           </div>
-        )}
-
-        <hr className="my-4" />
-
-        {/* New Customer Form */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-bold text-gray-800">New Customer</h3>
-
-          <input
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-            placeholder="Customer Name"
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-          />
-
-          <input
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-            placeholder="Phone Number"
-            value={customerPhone}
-            onChange={(e) => setCustomerPhone(e.target.value)}
-          />
-
-          <input
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-            placeholder="Address"
-            value={customerAddress}
-            onChange={(e) => setCustomerAddress(e.target.value)}
-          />
-
-          <button
-            onClick={async () => {
-              if (!customerName || !customerPhone)
-                return alert("Name and phone are required!");
-
-              const res = await axios.post(
-                process.env.NEXT_PUBLIC_API_LINK + "/request/api/createcustomer",
-                {
-                  name: customerName,
-                  phone: customerPhone,
-                  address: customerAddress,
-                }
-              );
-
-              setSelectedCustomer({
-                id: res.data.id,
-                name: customerName,
-                phone: customerPhone,
-                address: customerAddress,
-              });
-
-              setCustomerDrawerOpen(false);
-            }}
-            className="w-full bg-gradient-to-r from-orange-500 to-amber-400 text-white rounded-xl px-4 py-2 font-semibold shadow hover:brightness-105"
-          >
-            Save Customer
-          </button>
         </div>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
+      {previewPopupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white overflow-hidden shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h2 className="text-lg font-bold">Invoice & Payment</h2>
+              <button
+                onClick={() => setPreviewPopupOpen(false)}
+                className="p-1 rounded-lg hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              {/* Product List */}
+              <div className="rounded-xl border p-4">
+                <div className="font-semibold text-sm text-gray-700 mb-2">
+                  Product
+                </div>
+                {order.items.map((li) => (
+                  <div key={li.uid} className="space-y-1 border-b pb-2">
+                    <div className="flex justify-between">
+                      <span>
+                        {li.name} × {li.qty}
+                      </span>
+                      <span>
+                        {money((li.basePrice + li.priceExtra) * li.qty)}
+                      </span>
+                    </div>
+
+                    {/* modifiers */}
+                    {li.modifiers.length > 0 && (
+                      <div className="text-xs text-gray-600 ml-2">
+                        {li.modifiers
+                          .map((m) => {
+                            const item = menu.find((x) => x.id === li.itemId);
+                            const g = item?.modifierGroups?.find(
+                              (gg) => gg.id === m.groupId
+                            );
+                            const o = g?.options.find(
+                              (oo) => oo.id === m.optionId
+                            );
+                            return `${o?.name} (${money(o?.priceDelta || 0)})`;
+                          })
+                          .join(", ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Totals */}
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Sub-Total</span>
+                  <span className="font-semibold">
+                    {money(previewTotals.subtotal)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Discount %</span>
+                  <span className="font-semibold">
+                    {previewTotals.discount}
+                  </span>
+                </div>
+                <div className="flex justify-between text-lg">
+                  <span className="font-bold">Total ({CurrencySymbol})</span>
+                  <span className="font-extrabold">
+                    {money(previewTotals.total)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t px-6 py-4 flex justify-end gap-2">
+              <button
+                onClick={() => setPreviewPopupOpen(false)}
+                className="rounded-xl border px-4 py-2 font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setPreviewPopupOpen(false);
+                  await saveOrderToDatabase();
+                }}
+                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 text-white px-5 py-2 font-semibold shadow-lg"
+              >
+                Save Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ───────────────────────── Edit Line Drawer ───────────────────────── */}
       {editLine && (
@@ -1613,7 +1997,7 @@ delcustomeraddress: selectedCustomer?.address ?? "",
                 <div className="text-sm">
                   <div className="text-gray-600">Base</div>
                   <div className="font-semibold">
-                    $ {money(editLine.basePrice)}
+                    {CurrencySymbol} {money(editLine.basePrice)}
                   </div>
                 </div>
                 <div className="text-right">
@@ -1621,7 +2005,7 @@ delcustomeraddress: selectedCustomer?.address ?? "",
                     Estimated Line Total
                   </div>
                   <div className="text-lg font-extrabold text-orange-700">
-                    ${" "}
+                    {CurrencySymbol}{" "}
                     {money(
                       (editLine.basePrice +
                         (USE_MODIFIERS
