@@ -529,7 +529,7 @@ const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
     const tableKey = currentTableId ?? 0; // null → 0
     const isTakeaway = tableKey === 0;
 
-    let orderData = ordersInfo.find((o) => o.tableId === tableKey);
+    let orderData = ordersInfo && ordersInfo.find((o) => o.tableId === tableKey);
     if (!orderData) {
       orderData = { tableId: tableKey, items: order.items };
     }
