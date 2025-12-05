@@ -32,7 +32,7 @@ export default function LoginPage() {
     setError("");
      
     try {
-      const response =  await axios.post(process.env.NEXT_PUBLIC_API_LINK + "request/api/login",{
+      const response =  await axios.post(process.env.NEXT_PUBLIC_API_LINK + "/request/api/login",{
       "user_name" : username,
       "password" : password,
       "ua_remember" : false
@@ -53,6 +53,7 @@ export default function LoginPage() {
     localStorage.setItem('warehouse_id', data.warehouse_id);
     localStorage.setItem('exchange_rate',data.exchange_rate);
     localStorage.setItem('g_hash', data.g_hash);
+    localStorage.setItem('store_id', data.store_id);
 
     router.push("/pos");
     console.log("Login with", { username, password });

@@ -142,6 +142,10 @@ export default function POSPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [takeawayCustomerId, setTakeawayCustomerId] = useState(0);
+const [selectedCustomer, setSelectedCustomer] = useState<any>(null); 
+const [customerResults, setcustomerResults] = useState<any>([]);
+const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
+
 
   const [modifiers, setModifiers] = useState<
     { id: number; name: string; price: number }[]
@@ -557,12 +561,10 @@ export default function POSPage() {
       total: total,
       order_type: orderType,
       table_id: tableKey,
-      customer_id: orderType === "takeaway" ? customerInfo?.id ?? 0 : 0,
-      delcustomername: orderType === "takeaway" ? customerInfo?.name ?? "" : "",
-      delcustomerphone:
-        orderType === "takeaway" ? customerInfo?.phone ?? "" : "",
-      delcustomeraddress:
-        orderType === "takeaway" ? customerInfo?.address ?? "" : "",
+      customer_id: selectedCustomer?.id ?? 0,
+delcustomername: selectedCustomer?.name ?? "",
+delcustomerphone: selectedCustomer?.phone ?? "",
+delcustomeraddress: selectedCustomer?.address ?? "",
 
       customer_type: orderType,
 
@@ -588,7 +590,7 @@ export default function POSPage() {
     alert("Order saved!");
 
     // Remove only items for this table OR takeaway
-    const left = ordersInfo.filter((o) => o.tableId !== tableKey);
+    const left = ordersInfo && ordersInfo.filter((o) => o.tableId !== tableKey);
     setOrdersInfo(left);
     saveOrdersInfo(left);
 
@@ -641,9 +643,7 @@ export default function POSPage() {
 
   // Recalculate active tables any time ordersInfo changes
   useEffect(() => {
-    const actives = ordersInfo
-      .filter((o) => o.tableId && o.items && o.items.length > 0)
-      .map((o) => o.tableId);
+    const actives = ordersInfo && ordersInfo.filter((o) => o.tableId && o.items && o.items.length > 0).map((o) => o.tableId);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
@@ -944,6 +944,20 @@ export default function POSPage() {
               </ul>
             )}
           </div>
+<div className="flex items-center justify-between border-b px-4 py-2">
+  <div className="text-xs text-gray-500">
+    {currentTableId ? "Dine-In Order" : "Takeaway Order"}
+  </div>
+
+  {!currentTableId && (
+    <button 
+      onClick={() => setCustomerDrawerOpen(true)} 
+      className="text-orange-600 text-sm font-semibold hover:underline"
+    >
+      {selectedCustomer ? selectedCustomer.name : "Add Customer"}
+    </button>
+  )}
+</div>
 
           {/* Totals + Actions */}
           <div className="border-t border-white/60 p-4">
@@ -987,22 +1001,22 @@ export default function POSPage() {
               <button
                 className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
                 onClick={() => {
-                  const tableKey = currentTableId ?? 0;
-                  const isTakeaway = tableKey === 0;
+  const tableKey = currentTableId ?? 0;
 
-                  // For takeaway → if we don't have name / phone yet → open modal
-                  if (isTakeaway && (!customerName || !customerPhone)) {
-                    setTakeawayModalOpen(true);
-                    return;
-                  }
+  // 1) Takeaway → must select customer
+  if (tableKey === 0 && !selectedCustomer) {
+    return setCustomerDrawerOpen(true);
+  }
 
-                  // We already have data → save directly
-                  saveOrderToDatabase({
-                    name: customerName,
-                    phone: customerPhone,
-                    address: customerAddress,
-                  });
-                }}
+  // 2) Continue saving
+  saveOrderToDatabase({
+    id: selectedCustomer?.id ?? 0,
+    name: selectedCustomer?.name ?? "",
+    phone: selectedCustomer?.phone ?? "",
+    address: selectedCustomer?.address ?? "",
+  });
+}}
+
               >
                 Pay & Close
               </button>
@@ -1253,127 +1267,127 @@ export default function POSPage() {
         </div>
       )}
 
-      {takeawayModalOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-xl overflow-hidden">
-            {/* HEADER */}
-            <div className="flex items-center justify-between border-b px-6 py-3">
-              <h2 className="text-lg font-bold text-gray-900">
-                Takeaway Customer Info
-              </h2>
+      {customerDrawerOpen && (
+  <div className="fixed inset-0 z-50 flex">
+
+    {/* BACKDROP */}
+    <div
+      className="flex-1 bg-black/30"
+      onClick={() => setCustomerDrawerOpen(false)}
+    />
+
+    {/* DRAWER */}
+    <div className="w-full max-w-md bg-white shadow-2xl overflow-auto">
+
+      {/* HEADER */}
+      <div className="px-5 py-4 border-b flex justify-between items-center">
+        <h2 className="text-lg font-bold text-gray-900">Takeaway Customer</h2>
+        <button
+          onClick={() => setCustomerDrawerOpen(false)}
+          className="p-1 rounded-lg hover:bg-gray-100"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="p-5 space-y-4">
+
+        {/* Search Field */}
+        <div>
+          <label className="font-semibold text-sm text-gray-700">Search</label>
+          <input
+            className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            placeholder="Search customer by name or phone..."
+            onChange={async (e) => {
+              const q = e.target.value;
+              if (q.length < 2) return;
+              const res = await axios.get(process.env.NEXT_PUBLIC_API_LINK + "/request/api/searchcustomer", {
+                params: { q }
+              });
+              setCustomerResults(res.data.results || []);
+            }}
+          />
+        </div>
+
+        {/* Results */}
+        {customerResults?.length > 0 && (
+          <div className="space-y-2">
+            {customerResults.map((c: any) => (
               <button
-                onClick={() => setTakeawayModalOpen(false)}
-                className="rounded-lg p-1 hover:bg-gray-100"
+                key={c.id}
+                onClick={() => {
+                  setSelectedCustomer(c);
+                  setCustomerDrawerOpen(false);
+                }}
+                className="w-full text-left px-4 py-2 rounded-xl border bg-white hover:bg-orange-50"
               >
-                <X className="h-5 w-5" />
+                <div className="font-semibold">{c.name}</div>
+                <div className="text-xs text-gray-500">{c.phone}</div>
               </button>
-            </div>
+            ))}
+          </div>
+        )}
 
-            {/* FORM */}
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
+        <hr className="my-4" />
 
-                if (!customerName || !customerPhone) {
-                  return alert("Name and phone are required!");
-                }
+        {/* New Customer Form */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-gray-800">New Customer</h3>
 
-                // 1) Check if customer exists
-                const res = await axios.get(
-                  process.env.NEXT_PUBLIC_API_LINK +
-                    "/request/api/findcustomer",
-                  {
-                    params: {
-                      name: customerName,
-                      phone: customerPhone,
-                    },
-                  }
-                );
+          <input
+            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            placeholder="Customer Name"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+          />
 
-                let customerId = 0;
+          <input
+            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            placeholder="Phone Number"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+          />
 
-                if (res.data.exists) {
-                  customerId = res.data.customer_id;
-                }
+          <input
+            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            placeholder="Address"
+            value={customerAddress}
+            onChange={(e) => setCustomerAddress(e.target.value)}
+          />
 
-                setTakeawayCustomerId(customerId);
+          <button
+            onClick={async () => {
+              if (!customerName || !customerPhone)
+                return alert("Name and phone are required!");
 
-                // 2) Close modal
-                setTakeawayModalOpen(false);
-
-                // 3) Save order with correct customer ID
-                saveOrderToDatabase({
-                  id: customerId,
+              const res = await axios.post(
+                process.env.NEXT_PUBLIC_API_LINK + "/request/api/createcustomer",
+                {
                   name: customerName,
                   phone: customerPhone,
                   address: customerAddress,
-                });
-              }}
-            >
-              <div className="p-6 space-y-4">
-                {/* Customer Name */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-700">
-                    Customer Name
-                  </label>
-                  <input
-                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="John Doe"
-                    required
-                  />
-                </div>
+                }
+              );
 
-                {/* Phone */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-700">
-                    Customer Phone
-                  </label>
-                  <input
-                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="03 123 456"
-                    required
-                  />
-                </div>
+              setSelectedCustomer({
+                id: res.data.id,
+                name: customerName,
+                phone: customerPhone,
+                address: customerAddress,
+              });
 
-                {/* Address */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-700">
-                    Address
-                  </label>
-                  <input
-                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                    value={customerAddress}
-                    onChange={(e) => setCustomerAddress(e.target.value)}
-                    placeholder="Street / Building / Floor"
-                  />
-                </div>
-              </div>
-
-              {/* FOOTER */}
-              <div className="border-t px-6 py-3 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTakeawayModalOpen(false)}
-                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
-                >
-                  Save & Continue
-                </button>
-              </div>
-            </form>
-          </div>
+              setCustomerDrawerOpen(false);
+            }}
+            className="w-full bg-gradient-to-r from-orange-500 to-amber-400 text-white rounded-xl px-4 py-2 font-semibold shadow hover:brightness-105"
+          >
+            Save Customer
+          </button>
         </div>
-      )}
+      </div>
+    </div>
+  </div>
+)}
+
 
       {/* ───────────────────────── Edit Line Drawer ───────────────────────── */}
       {editLine && (
