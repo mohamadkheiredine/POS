@@ -66,7 +66,6 @@ type AppliedModifier = {
 type OrderItem = {
   uid: UID;
   itemId: number;
-  tableId?: number;
   name: string;
   basePrice: number;
   qty: number;
@@ -90,6 +89,12 @@ type Order = {
   items: OrderItem[];
   createdAt: number;
   status: "open" | "paid" | "void";
+};
+
+type LocalOrder = {
+  orderId: string;
+  tableIds: number[];
+  items: OrderItem[];
 };
 
 /* =============================================================================
@@ -146,6 +151,8 @@ export default function POSPage() {
   const [customerResults, setCustomerResults] = useState<any>([]);
   const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [firstMergeTable, setFirstMergeTable] = useState<number | null>(null);
 
   const [previewPopupOpen, setPreviewPopupOpen] = useState(false);
   const [previewTotals, setPreviewTotals] = useState({
@@ -314,26 +321,22 @@ export default function POSPage() {
     createdAt: Date.now(),
     status: "open",
   });
-  const [ordersInfo, setOrdersInfo] = useState<
-    { tableId: number; items: any[] }[]
-  >([]);
+  const [ordersInfo, setOrdersInfo] = useState<LocalOrder[]>([]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved: any = localStorage.getItem("orders_info");
       try {
-        const parsed: { tableId: number; items: OrderItem[] }[] =
-          JSON.parse(saved);
-
+        const parsed: LocalOrder[] = JSON.parse(saved || "[]");
         setOrdersInfo(parsed);
 
         const actives = parsed
           .filter(
-            (o) => o.tableId && o.tableId !== 0 && o.items && o.items.length > 0
+            (o) => o.tableIds && o.tableIds.length > 0 && o.items.length > 0
           )
-          .map((o) => o.tableId);
+          .flatMap((o) => o.tableIds);
 
-        setActiveTables(Array.from(new Set(actives)));
+        setActiveTables([...new Set(actives)]);
       } catch (e) {
         console.error("Failed to parse orders_info from localStorage", e);
       }
@@ -355,6 +358,16 @@ export default function POSPage() {
   const [takeawayPreview, setTakeawayPreview] = useState(false);
   const [customerType, setCustomerType] = useState("takeaway");
   const [paymentType, setPaymentType] = useState("");
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
+  const API_URL = process.env.NEXT_PUBLIC_API_LINK;
+  const [g_hash, setGHash] = useState<string | null>(null);
+  const [user_id, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setGHash(localStorage.getItem("g_hash"));
+      setUserId(localStorage.getItem("user_id"));
+    }
+  }, []);
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -377,19 +390,121 @@ export default function POSPage() {
   const total = subtotal + tax;
 
   /* -------------------- table selection -------------------- */
-  const selectTable = (table: Table) => {
+  // const selectTable = (table: Table) => {
+
+  //   if (mergeMode) {
+  //     if (!firstMergeTable) {
+  //       setFirstMergeTable(table.id);
+  //       alert(`Now select the second table to merge with ${table.label}`);
+  //       return;
+  //     } else {
+  //       mergeTables(firstMergeTable, table.id);
+  //       setMergeMode(false);
+  //       setFirstMergeTable(null);
+  //       return;
+  //     }
+  //   }
+
+  //   const order = ordersInfo.find(
+  //     (o) => Array.isArray(o.tableIds) && o.tableIds.includes(table.id)
+  //   );
+
+  //   setCurrentTableId(table.id);
+
+  //   setOrder({
+  //     id: order?.orderId || uid(),
+  //     guests: 0,
+  //     items: order?.items || [],
+  //     createdAt: Date.now(),
+  //     status: "open",
+  //   });
+  // };
+
+  const selectTable = async (table: Table) => {
+    if (mergeMode) {
+      if (firstMergeTable === null) {
+        setFirstMergeTable(table.id);
+        alert(`Now select the second table to merge with ${table.label}`);
+        return;
+      }
+
+      // Second selection → perform merge
+      mergeTables(firstMergeTable, table.id);
+      setMergeMode(false);
+      setFirstMergeTable(null);
+      return;
+    }
+
+    const existing = ordersInfo.find((o) => o.tableIds.includes(table.id));
+
+    if (existing) {
+      setCurrentOrderId(existing.orderId);
+      setCurrentTableId(table.id);
+      setOrder({
+        id: existing.orderId,
+        items: existing.items,
+        createdAt: Date.now(),
+        status: "open",
+      });
+      return;
+    }
+
+    const res = await axios.post(API_URL + "/api/orders/createemptyorder", {
+      g_hash,
+      user_id,
+    });
+
+    if (res.data.is_error) return alert(res.data.error_msg);
+
+    const newOrderId = res.data.order_id;
+
+    const newOrder: LocalOrder = {
+      orderId: newOrderId,
+      tableIds: [table.id],
+      items: [],
+    };
+
+    setOrdersInfo((prev) => [...prev, newOrder]);
+    setCurrentOrderId(newOrderId);
     setCurrentTableId(table.id);
 
-    const tableOrder = ordersInfo.find((o) => o.tableId === table.id);
-
     setOrder({
-      id: uid(),
-      guests: 0,
-      items: tableOrder ? tableOrder.items : [],
+      id: newOrderId,
+      items: [],
       createdAt: Date.now(),
       status: "open",
     });
   };
+
+  useEffect(() => {
+    async function loadPendingOrders() {
+      const res = await axios.post(API_URL + "/api/orders/sync", {
+        g_hash,
+        user_id,
+      });
+
+      if (res.data.is_error) return;
+
+      const loadedOrders = res.data.orders.map((o) => ({
+        orderId: o.order_id,
+        tableIds: o.tables,
+        items: o.items.map((it) => ({
+          uid: uid(),
+          itemId: it.oi_item_id,
+          qty: it.oi_quantity,
+          basePrice: it.oi_unit_price,
+          modifiers: [],
+          note: it.oi_notes,
+          priceExtra: 0,
+          sentToKitchen: true,
+        })),
+      }));
+
+      setOrdersInfo(loadedOrders);
+    }
+
+    loadPendingOrders();
+  }, []);
 
   const addItemStart = (item: MenuItem) => {
     setModItem(item);
@@ -446,16 +561,14 @@ export default function POSPage() {
     });
   };
 
-  const confirmAddToOrder = async () => {
+  const confirmAddToOrder = () => {
     if (!modItem) return;
 
     const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
-    const tableKey = currentTableId || 0;
 
     const newLine: OrderItem = {
       uid: uid(),
       itemId: modItem.id,
-      tableId: tableKey,
       name: modItem.name,
       basePrice: modItem.price,
       qty: modQty,
@@ -466,25 +579,77 @@ export default function POSPage() {
       sentToKitchen: false,
     };
 
-    const updatedItems = [...order.items, newLine];
-    setOrder((o) => ({ ...o, items: updatedItems }));
+    setOrder((o) => ({ ...o, items: [...o.items, newLine] }));
 
-    const updatedOrders = [...ordersInfo];
-    const index = updatedOrders.findIndex((o) => o.tableId === tableKey);
-
-    if (index >= 0) {
-      updatedOrders[index].items = updatedItems;
-    } else {
-      updatedOrders.push({
-        tableId: tableKey,
-        items: updatedItems,
-      });
-    }
-
-    setOrdersInfo(updatedOrders);
-    saveOrdersInfo(updatedOrders);
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === currentOrderId
+          ? { ...o, items: [...o.items, newLine] }
+          : o
+      )
+    );
 
     setModItem(null);
+  };
+
+  const sendToKitchen = async () => {
+    const orderData = ordersInfo.find((o) => o.orderId === order.id);
+    if (!orderData) return alert("Order not found");
+
+    if (!g_hash || !user_id) {
+      return alert("Missing authentication data");
+    }
+
+    const payload = {
+      g_hash,
+      user_id,
+      warehouse_id: localStorage.getItem("warehouse_id"),
+
+      order_id: order.id,
+      order_type: "dine_in",
+      table_ids: orderData.tableIds.join(","),
+
+      sub_total: subtotal,
+      discount: 0,
+      total: total,
+
+      order_items: JSON.stringify(
+        orderData.items.map((li) => ({
+          item_id: li.itemId,
+          quantity: li.qty,
+          unit_price: li.basePrice + li.priceExtra,
+          discount: 0,
+          station_id: 1,
+          notes: li.note || "",
+          modifiers: li.modifiers.map((m) => ({
+            group_id: m.groupId,
+            option_id: m.optionId,
+            name: m.name,
+            price: m.price,
+          })),
+        }))
+      ),
+    };
+
+    try {
+      const res = await axios.post(
+        API_URL + "/api/orders/updateorder",
+        payload
+      );
+
+      if (res.data.is_error) {
+        alert(res.data.error_msg);
+        return;
+      }
+
+      alert("Order sent to kitchen!");
+
+      setOrdersInfo(ordersInfo.filter((o) => o.orderId !== order.id));
+      setCurrentTableId(null);
+    } catch (err: any) {
+      console.error("Update Order API Error:", err.response?.data || err);
+      alert("Error sending order. Backend returned 500.");
+    }
   };
 
   /* -------------------- edit line -------------------- */
@@ -508,24 +673,11 @@ export default function POSPage() {
       items: o.items.filter((x) => x.uid !== uidLine),
     }));
 
-  const sendToKitchen = () => {
-    setOrder((o) => ({
-      ...o,
-      items: o.items.map((x) => ({ ...x, sentToKitchen: true })),
-    }));
-    alert("Order sent to kitchen!");
-  };
-
   const itemsForCurrentTable = useMemo(() => {
-    if (currentTableId !== null) {
-      return order.items.filter((li) => li.tableId === currentTableId);
-    }
-    return order.items;
-  }, [order.items, currentTableId]);
+    return order.items; // show ALL items for merged tables
+  }, [order.items]);
 
-  function saveOrdersInfo(
-    allOrders: { tableId: number; items: OrderItem[] }[]
-  ) {
+  function saveOrdersInfo(allOrders: LocalOrder[]) {
     localStorage.setItem("orders_info", JSON.stringify(allOrders));
   }
 
@@ -539,9 +691,14 @@ export default function POSPage() {
 
     const orderType = isTakeaway ? "takeaway" : "dine_in";
 
-    let orderData = ordersInfo.find((o) => o.tableId === tableKey);
+    let orderData = ordersInfo.find((o) => o.tableIds.includes(tableKey));
+
     if (!orderData) {
-      orderData = { tableId: tableKey, items: order.items };
+      orderData = {
+        orderId: uid(),
+        tableIds: [tableKey],
+        items: order.items,
+      };
     }
 
     if (!orderData.items || orderData.items.length === 0) {
@@ -593,12 +750,11 @@ export default function POSPage() {
 
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
-      store_id: localStorage.getItem("store_id"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
 
       order_type: orderType,
-      table_id: tableKey,
+      table_id: orderData.tableIds.join(","),
 
       customer_id: finalCustomerId ?? customer_id,
       delcustomername: delName,
@@ -624,7 +780,8 @@ export default function POSPage() {
       setReceiptHTML(response.data.receipt_html);
     }
 
-    const remaining = ordersInfo.filter((o) => o.tableId !== tableKey);
+    const remaining = ordersInfo.filter((o) => !o.tableIds.includes(tableKey));
+
     setOrdersInfo(remaining);
     localStorage.setItem("orders_info", JSON.stringify(remaining));
 
@@ -679,11 +836,9 @@ export default function POSPage() {
 
   // Recalculate active tables any time ordersInfo changes
   useEffect(() => {
-    const actives =
-      ordersInfo &&
-      ordersInfo
-        .filter((o) => o.tableId && o.items && o.items.length > 0)
-        .map((o) => o.tableId);
+    const actives = ordersInfo
+      .filter((o) => o.tableIds && o.items.length > 0)
+      .flatMap((o) => o.tableIds);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
@@ -698,6 +853,58 @@ export default function POSPage() {
       status: "open",
     });
   };
+
+  function mergeTables(t1: number, t2: number) {
+    const o1 = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2 = ordersInfo.find((o) => o.tableIds.includes(t2));
+
+    if (!o1 && !o2) return alert("Both tables have no orders");
+    if (o1 && !o2) {
+      const updated = {
+        ...o1,
+        tableIds: Array.from(new Set([...o1.tableIds, t2])),
+      };
+      setOrdersInfo(
+        ordersInfo.map((o) => (o.orderId === o1.orderId ? updated : o))
+      );
+      return;
+    }
+    if (!o1 && o2) {
+      const updated = {
+        ...o2,
+        tableIds: Array.from(new Set([...o2.tableIds, t1])),
+      };
+      setOrdersInfo(
+        ordersInfo.map((o) => (o.orderId === o2.orderId ? updated : o))
+      );
+      return;
+    }
+
+    // Both have orders
+    if (o1.orderId === o2.orderId) return alert("Same order already");
+
+    const merged: LocalOrder = {
+      orderId: o1.orderId,
+      tableIds: Array.from(new Set([...o1.tableIds, ...o2.tableIds])),
+      items: [...o1.items, ...o2.items],
+    };
+
+    const remaining = ordersInfo.filter(
+      (o) => o.orderId !== o1.orderId && o.orderId !== o2.orderId
+    );
+
+    setOrdersInfo([...remaining, merged]);
+
+    if (currentTableId === t1 || currentTableId === t2) {
+      setCurrentOrderId(merged.orderId);
+      setCurrentTableId(t1);
+      setOrder((prev) => ({
+        ...prev,
+        id: merged.orderId,
+        items: merged.items,
+      }));
+    }
+  }
 
   /* -------------------- render -------------------- */
   return (
@@ -1062,6 +1269,17 @@ export default function POSPage() {
                 }}
               >
                 Pay & Close
+              </button>
+
+              <button
+                onClick={() => {
+                  setMergeMode(true);
+                  setFirstMergeTable(null);
+                  alert("Select the first table to merge");
+                }}
+                className="rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50"
+              >
+                Merge
               </button>
             </div>
           </div>
