@@ -1,0 +1,135 @@
+{
+  "login": {
+    "title": "Bon retour",
+    "subtitle": "Connectez-vous pour continuer à gérer les commandes.",
+    "username": "Nom d’utilisateur",
+    "password": "Mot de passe",
+    "remember": "Se souvenir de moi",
+    "required": "Oups ! Les deux champs sont obligatoires.",
+    "rights": "Tous droits réservés.",
+    "hide": "Masquer",
+    "show": "Afficher",
+    "submit": "Allons-y"
+  },
+
+  "POS": {
+    "tables": "Tables",
+    "merge": "Fusionner",
+    "transfer": "Transférer",
+    "active": "ACTIF",
+    "hasOrder": "A UNE COMMANDE",
+    "seats": "Places",
+    "table": "Table",
+    "hold": "Mettre en attente",
+    "discount": "Réduction",
+    "addItems": "Ajouter des articles du menu…",
+    "notSent": "Non envoyé",
+    "edit": "Modifier",
+    "remove": "Supprimer",
+    "base": "Base",
+    "subtotal": "Sous-total",
+    "tax": "Taxe",
+    "total": "Total",
+    "sendToKitchen": "Envoyer à la cuisine",
+    "newOrder": "Nouvelle commande",
+    "payClose": "Payer & Fermer",
+    "required": "Obligatoire",
+    "quantity": "Quantité",
+    "noModifiers": "Pas de modificateurs",
+    "lineTotal": "Total de la ligne",
+    "addToOrder": "Ajouter à la commande",
+    "cancel": "Annuler",
+    "receiptPreview": "Aperçu du reçu",
+    "close": "Fermer",
+    "print": "Imprimer",
+    "takeawayCustomer": "Client à emporter",
+    "customer": "Client",
+    "cash": "Espèces",
+    "card": "Carte",
+    "search": "Rechercher",
+    "orderType": "Type de commande",
+    "addNewCustomer": "Ajouter un nouveau client",
+    "newCustomer": "Nouveau client",
+    "kitchenStation": "Poste cuisine",
+    "modifiers": "Modificateurs",
+    "itemNote": "Note de l’article",
+    "removeItem": "Supprimer l’article",
+    "applyChanges": "Appliquer les modifications",
+    "takeaway": "À emporter",
+    "delivery": "Livraison",
+    "product": "Produit"
+  },
+
+  "orders": {
+    "orders": "Commandes",
+    "ordersList": "Liste des commandes du restaurant",
+    "code": "Code",
+    "warehouse": "Entrepôt",
+    "created": "Créé",
+    "total": "Total",
+    "loading": "Chargement...",
+    "noOrders": "Aucune commande trouvée…"
+  },
+
+  "kds": {
+    "kitchenBoard": "Tableau de cuisine",
+    "allKitchens": "Toutes les cuisines"
+  },
+
+  "menu": {
+    "dashboard": "Tableau de bord",
+
+    "foh": "Salle / Service",
+    "floor": "Plan de salle",
+    "pos": "Caisse (POS)",
+    "orders": "Commandes",
+
+    "kitchen": "Cuisine",
+    "kds": "Écrans cuisine (KDS)",
+    "prep": "Préparation",
+
+    "inventory": "Stock & Inventaire",
+    "items": "Articles",
+    "recipes": "Recettes / Nomenclature",
+    "movements": "Mouvements",
+    "counts": "Inventaires",
+    "purchasing": "Achats",
+    "costing": "Coûts",
+
+    "menu": "Menu",
+    "modifiers": "Options & Suppléments",
+    "pricing": "Tarification",
+    "engineering": "Analyse du menu",
+    "taxes": "Taxes",
+
+    "crm": "Clients & Fidélité",
+    "customers": "Clients",
+    "loyalty": "Fidélité",
+    "promotions": "Promotions",
+
+    "cash": "Caisse & Finances",
+    "cash_drawer": "Tiroir-caisse",
+    "deposits": "Dépôts & Lots",
+    "audit": "Audit",
+
+    "reports": "Rapports",
+    "realtime": "Indicateurs en temps réel",
+    "sales": "Ventes",
+    "labor": "Main-d’œuvre",
+    "finance": "Finance",
+
+    "settings": "Paramètres",
+    "printers": "Imprimantes",
+    "payments": "Terminaux de paiement",
+    "integrations": "Intégrations",
+    "brand": "Identité de marque",
+    "locations": "Établissements",
+    "workflows": "Flux de travail",
+    "notifications": "Notifications",
+
+    "admin": "Administration",
+    "users": "Utilisateurs",
+    "permissions": "Permissions",
+    "audit_log": "Journal d’audit"
+  }
+}
