@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import "../globals.css";
 import {
   Home,
@@ -43,6 +43,7 @@ export default function MainLayout({
   const { t } = useI18n(lang);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [profileMenu, setProfileMenu] = useState(false);
+  const router = useRouter();
 
   // which sections are expanded
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -439,7 +440,8 @@ export default function MainLayout({
                       className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-50"
                       onClick={() => {
                         setProfileMenu(false);
-                        alert("TODO: logout");
+                        localStorage.clear();
+                        router.push("/login");
                       }}
                     >
                       <LogOut size={16} /> Logout

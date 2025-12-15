@@ -453,10 +453,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       if (res.data.is_error) return;
 
-      const loadedOrders = res.data.orders.map((o) => ({
+      const loadedOrders = res.data.orders.map((o:any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
-        items: o.items.map((it) => ({
+        items: o.items.map((it:any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -589,7 +589,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           discount: 0,
           station_id: 1,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m) => ({
+          modifiers: li.modifiers.map((m:any) => ({
             group_id: m.groupId,
             option_id: m.optionId,
             name: m.name,
@@ -720,6 +720,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
+      company_id: localStorage.getItem("company_id"),
 
       order_type: orderType,
       table_id: orderData.tableIds.join(","),
@@ -823,8 +824,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   function mergeTables(t1: number, t2: number) {
-    const o1 = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2 = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const o1:any = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2:any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
     if (o1 && !o2) {
@@ -843,7 +844,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         tableIds: Array.from(new Set([...o2.tableIds, t1])),
       };
       setOrdersInfo(
-        ordersInfo.map((o) => (o.orderId === o2.orderId ? updated : o))
+        ordersInfo.map((o:any) => (o.orderId === o2.orderId ? updated : o))
       );
       return;
     }

@@ -59,6 +59,7 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
       localStorage.setItem("exchange_rate", data.exchange_rate);
       localStorage.setItem("g_hash", data.g_hash);
       localStorage.setItem("store_id", data.store_id);
+      localStorage.setItem("company_id", data.company_id);
 
       router.push("/pos");
       console.log("Login with", { username, password });
