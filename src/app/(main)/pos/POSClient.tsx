@@ -25,7 +25,7 @@ import LanguageSwitch from "@/components/shared/language-switch";
  * ========================================================================== */
 type UID = string;
 
-type KitchenStation = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
+// type KitchenStation = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
 type ModifierOption = {
   id: UID;
@@ -51,8 +51,8 @@ type MenuItem = {
   currency_code: string;
   cc_id: number;
   categoryName?: string;
-  kitchenRoute?: KitchenStation;
-  modifierGroups?: ModifierGroup[];
+
+  kitchen_station_id: number;
 };
 
 type AppliedModifier = {
@@ -61,15 +61,15 @@ type AppliedModifier = {
 };
 
 type OrderItem = {
-  uid: UID;
+  uid: string;
   itemId: number;
   name: string;
   basePrice: number;
   qty: number;
-  kitchen: KitchenStation;
+  stationId: number;
   note?: string;
-  modifiers: AppliedModifier[]; // chosen modifiers
-  priceExtra: number; // derived from modifiers
+  modifiers: AppliedModifier[];
+  priceExtra: number;
   sentToKitchen: boolean;
 };
 
@@ -94,16 +94,12 @@ type LocalOrder = {
   items: OrderItem[];
 };
 
-/* =============================================================================
- * Mock Data
- * ========================================================================== */
-const KITCHEN_STATIONS: KitchenStation[] = [
-  "Grill",
-  "Salad",
-  "Bar",
-  "Dessert",
-  "Expo",
-];
+type KitchenStationDB = {
+  ks_id: number;
+  ks_name: string;
+};
+
+type KitchenRoute = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
 /* =============================================================================
  * Helpers
@@ -129,6 +125,14 @@ function priceFromModifiers(
   }
   return extra;
 }
+
+const KITCHEN_STATIONS: KitchenRoute[] = [
+  "Grill",
+  "Salad",
+  "Bar",
+  "Dessert",
+  "Expo",
+];
 
 const USE_MODIFIERS = process.env.NEXT_PUBLIC_USE_MODIFIER === "true";
 
@@ -161,6 +165,34 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [modifiers, setModifiers] = useState<
     { id: number; name: string; price: number }[]
   >([]);
+  const [kitchenStations, setKitchenStations] = useState<KitchenStationDB[]>(
+    []
+  );
+
+  const loadKitchenStations = async () => {
+    try {
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getstationsname`,
+        {
+          params: {
+            g_hash: localStorage.getItem("g_hash"),
+            user_id: localStorage.getItem("user_id"),
+          },
+        }
+      );
+
+      if (!res.data.is_error) {
+        setKitchenStations(res.data.stations);
+      }
+    } catch (err) {
+      console.error("Failed to load kitchen stations", err);
+    }
+  };
+
+  useEffect(() => {
+    loadKitchenStations();
+  }, []);
+
 
   const { t } = useI18n(lang);
 
@@ -217,7 +249,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         currency_code: it.currency_code,
         cc_id: it.cc_id,
         categoryName: it.category_name,
-        kitchenRoute: it.kitchen_route || "Expo",
+        kitchen_station_id: Number(it.mi_kitchen_station_id ?? 1),
         modifierGroups: USE_MODIFIERS
           ? [
               {
@@ -453,10 +485,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       if (res.data.is_error) return;
 
-      const loadedOrders = res.data.orders.map((o:any) => ({
+      const loadedOrders = res.data.orders.map((o: any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
-        items: o.items.map((it:any) => ({
+        items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -540,7 +572,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       name: modItem.name,
       basePrice: modItem.price,
       qty: modQty,
-      kitchen: modItem.kitchenRoute || "Expo",
+      stationId: modItem.kitchen_station_id,
       note: "",
       modifiers: modSelected,
       priceExtra,
@@ -564,14 +596,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const orderData = ordersInfo.find((o) => o.orderId === order.id);
     if (!orderData) return alert("Order not found");
 
-    if (!g_hash || !user_id) {
-      return alert("Missing authentication data");
-    }
+    if (!g_hash || !user_id) return alert("Missing auth");
 
     const payload = {
       g_hash,
       user_id,
-      warehouse_id: localStorage.getItem("warehouse_id"),
+      customer_id: 0,
 
       order_id: order.id,
       order_type: "dine_in",
@@ -587,37 +617,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           quantity: li.qty,
           unit_price: li.basePrice + li.priceExtra,
           discount: 0,
-          station_id: 1,
+          station_id: li.stationId,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m:any) => ({
-            group_id: m.groupId,
-            option_id: m.optionId,
-            name: m.name,
-            price: m.price,
-          })),
+          modifiers: [],
         }))
       ),
     };
 
-    try {
-      const res = await axios.post(
-        API_URL + "/api/orders/updateorder",
-        payload
-      );
+    const res = await axios.post(API_URL + "/api/orders/updateorder", payload);
 
-      if (res.data.is_error) {
-        alert(res.data.error_msg);
-        return;
-      }
-
-      alert("Order sent to kitchen!");
-
-      setOrdersInfo(ordersInfo.filter((o) => o.orderId !== order.id));
-      setCurrentTableId(null);
-    } catch (err: any) {
-      console.error("Update Order API Error:", err.response?.data || err);
-      alert("Error sending order. Backend returned 500.");
+    if (res.data.is_error) {
+      alert(res.data.error_msg);
+      return;
     }
+
+    alert("Order sent to kitchen (print queued)");
+
+    setOrdersInfo((prev) => prev.filter((o) => o.orderId !== order.id));
+    setCurrentTableId(null);
   };
 
   /* -------------------- edit line -------------------- */
@@ -824,8 +841,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   function mergeTables(t1: number, t2: number) {
-    const o1:any = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2:any = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const o1: any = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
     if (o1 && !o2) {
@@ -844,7 +861,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         tableIds: Array.from(new Set([...o2.tableIds, t1])),
       };
       setOrdersInfo(
-        ordersInfo.map((o:any) => (o.orderId === o2.orderId ? updated : o))
+        ordersInfo.map((o: any) => (o.orderId === o2.orderId ? updated : o))
       );
       return;
     }
