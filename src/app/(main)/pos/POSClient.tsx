@@ -18,12 +18,11 @@ import {
 import "../../../components/theme/pages/pos.scss";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
-import LanguageSwitch from "@/components/shared/language-switch";
 
 /* =============================================================================
  * Types
  * ========================================================================== */
-type UID = string;
+type UID = number;
 
 type KitchenStation = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
@@ -226,7 +225,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 type: "optional",
                 maxSelect: 0,
                 options: modifiers.map((m) => ({
-                  id: "opt-" + m.id,
+                  id: m.id,
                   name: m.name,
                   priceDelta: Number(m.price),
                 })),
@@ -453,10 +452,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       if (res.data.is_error) return;
 
-      const loadedOrders = res.data.orders.map((o:any) => ({
+      const loadedOrders = res.data.orders.map((o: any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
-        items: o.items.map((it:any) => ({
+        items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -589,11 +588,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           discount: 0,
           station_id: 1,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m:any) => ({
-            group_id: m.groupId,
-            option_id: m.optionId,
-            name: m.name,
-            price: m.price,
+          modifiers: li.modifiers.map((m) => ({
+            id: Number(m.optionId),
           })),
         }))
       ),
@@ -681,8 +677,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       station_id: 1,
       notes: li.note || "",
       modifiers: li.modifiers.map((m) => ({
-        group_id: m.groupId,
-        option_id: m.optionId,
+        id: m.optionId,
         name:
           menu
             .find((it) => it.id === li.itemId)
@@ -738,10 +733,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
+    console.log("before ----------------");
+    console.log("PAYLOAD -----", payload);
+
     const response = await axios.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
       payload
     );
+    console.log("response ", response);
 
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
@@ -824,8 +823,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   function mergeTables(t1: number, t2: number) {
-    const o1:any = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2:any = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const o1: any = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
     if (o1 && !o2) {
@@ -844,7 +843,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         tableIds: Array.from(new Set([...o2.tableIds, t1])),
       };
       setOrdersInfo(
-        ordersInfo.map((o:any) => (o.orderId === o2.orderId ? updated : o))
+        ordersInfo.map((o: any) => (o.orderId === o2.orderId ? updated : o))
       );
       return;
     }
