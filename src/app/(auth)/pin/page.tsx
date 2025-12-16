@@ -1,15 +1,20 @@
 "use client";
 
+import axios from "axios";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+
 import React, { useEffect, useRef, useState } from "react";
 
-const PIN_LENGTH = 6;
+const PIN_LENGTH = 5;
 
 export default function PinLoginPage() {
   const [pin, setPin] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
 
   // Focus the hidden input so keyboard works
   useEffect(() => {
@@ -38,6 +43,7 @@ export default function PinLoginPage() {
     }
   };
 
+
   const onSubmit = async () => {
     if (pin.length !== PIN_LENGTH) {
       setError(`Enter ${PIN_LENGTH}-digit PIN.`);
@@ -46,12 +52,24 @@ export default function PinLoginPage() {
     setIsSubmitting(true);
     setError("");
     try {
-      // TODO: Replace with your API call, e.g. await loginWithPin(pin);
-      await new Promise((r) => setTimeout(r, 700));
-      console.log("PIN login:", pin);
-      // router.push("/floor") or wherever
+      const url = `${process.env.NEXT_PUBLIC_API_LINK}/request/api/loginposbypin`;
+      const res = await axios.post(url, { pin });
+
+      if (res.data?.is_error) {
+        setError(res.data.error_message || "Invalid PIN. Try again.");
+        return;
+      }
+
+      localStorage.setItem("g_hash", res.data.g_hash);
+      localStorage.setItem("user_id", String(res.data.user_id));
+      localStorage.setItem("company_id", String(res.data.company_id));
+      localStorage.setItem("store_id", String(res.data.store_id));
+      localStorage.setItem("warehouse_id", String(res.data.warehouse_id));
+
+      router.push("/pos");
+
     } catch (e) {
-      setError("Invalid PIN. Try again.");
+      setError("Login failed. Try again.");
     } finally {
       setIsSubmitting(false);
       clearAll();
@@ -78,7 +96,7 @@ export default function PinLoginPage() {
             height={52}
             priority
             className="drop-shadow-sm"
-          /> 
+          />
         </div>
 
         <div className="px-8 pb-8 pt-4">
@@ -112,7 +130,11 @@ export default function PinLoginPage() {
                 <div
                   key={i}
                   className={`h-12 w-12 rounded-2xl border text-center text-xl font-semibold leading-[48px] transition
-                  ${filled ? "border-orange-400 bg-orange-50 text-orange-600" : "border-gray-200 bg-white text-gray-400"}
+                  ${
+                    filled
+                      ? "border-orange-400 bg-orange-50 text-orange-600"
+                      : "border-gray-200 bg-white text-gray-400"
+                  }
                   `}
                 >
                   {filled ? "•" : "–"}
@@ -142,9 +164,10 @@ export default function PinLoginPage() {
                     push(k);
                   }}
                   className={`h-14 rounded-2xl border text-lg font-semibold shadow-sm transition active:scale-[0.98]
-                    ${isAction
-                      ? "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                      : "border-gray-200 bg-white text-gray-900 hover:bg-orange-50"
+                    ${
+                      isAction
+                        ? "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                        : "border-gray-200 bg-white text-gray-900 hover:bg-orange-50"
                     }`}
                 >
                   {k}
@@ -155,7 +178,6 @@ export default function PinLoginPage() {
 
           {/* actions */}
           <div className="mt-5 flex items-center justify-between">
-
             <button
               onClick={onSubmit}
               disabled={isSubmitting}
@@ -167,7 +189,9 @@ export default function PinLoginPage() {
           </div>
 
           <p className="mt-6 text-center text-xs text-gray-500">
-            © {new Date().getFullYear()} <span className="font-semibold">TitanPOS®</span> — All rights reserved.
+            © {new Date().getFullYear()}{" "}
+            <span className="font-semibold">TitanPOS®</span> — All rights
+            reserved.
           </p>
         </div>
       </div>
