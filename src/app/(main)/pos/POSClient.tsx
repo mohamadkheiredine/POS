@@ -1772,13 +1772,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {/* NEW CUSTOMER FORM */}
 
               <button
-                disabled={!selectedCustomer && !showNewCustomer}
-                className={`w-full mt-4 px-4 py-3 text-sm font-semibold rounded-xl 
-    ${
-      !selectedCustomer && !showNewCustomer
-        ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-        : "bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-lg"
-    }`}
+                className={`w-full mt-4 px-4 py-3 text-sm font-semibold rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-lg`}
                 onClick={async () => {
                   let finalCustomerId = null;
 
@@ -1828,10 +1822,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                       customer_mobile: customerPhone,
                       customer_address: customerAddress,
                     });
-                  }
-
-                  if (!finalCustomerId) {
-                    return alert("Customer is missing!");
                   }
 
                   setCustomerDrawerOpen(false);
