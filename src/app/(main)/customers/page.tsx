@@ -4,6 +4,8 @@ import React, { useEffect, useState } from "react";
 import { Search, Filter, Plus, X, CheckCircle2 } from "lucide-react";
 import CustomerCard from "@/components/shared/customer-card";
 import axios from "axios";
+import { api } from "@/lib/api";
+import { forceLogout } from "@/lib/logout";
 
 /* ─────────────────────────────────────────
  * Types
@@ -44,9 +46,17 @@ export default function POSCustomersPage() {
     customer?: Customer | null;
   }>({ open: false });
 
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      forceLogout("You are not logged in. Please login.");
+    }
+  }, []);
+
   const getCustomers = async () => {
     try {
-      const { data } = await axios.get(
+      const { data } = await api.get(
         process.env.NEXT_PUBLIC_API_LINK + "/request/api/listcustomers",
         {
           params: {
@@ -121,7 +131,7 @@ export default function POSCustomersPage() {
   // here should get the customer using api
   const startEdit = async (c: Customer) => {
     try {
-      const { data } = await axios.get(
+      const { data } = await api.get(
         process.env.NEXT_PUBLIC_API_LINK + "/request/api/getcustomerinfo",
         {
           params: {
@@ -166,7 +176,7 @@ export default function POSCustomersPage() {
   };
 
   const saveCustomer = async (c: Customer) => {
-    await axios.post(
+    await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/request/api/savecustomer",
       {
         user_id: localStorage.getItem("user_id"),
@@ -202,7 +212,7 @@ export default function POSCustomersPage() {
   };
 
   const deleteCustomer = async (id: number) => {
-    await axios.post(
+    await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/request/api/deletecustomers",
       {
         user_id: localStorage.getItem("user_id"),

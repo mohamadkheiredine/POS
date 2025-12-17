@@ -19,6 +19,8 @@ import "../../../components/theme/pages/pos.scss";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
 import LanguageSwitch from "@/components/shared/language-switch";
+import { api } from "@/lib/api";
+import { forceLogout } from "@/lib/logout";
 
 /* =============================================================================
  * Types
@@ -165,7 +167,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const { t } = useI18n(lang);
 
   const loadModifiers = async () => {
-    const res = await axios.get(
+    const res = await api.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistmodifiers",
       {
         params: {
@@ -194,9 +196,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setCurrencySymbol(localStorage.getItem("currency_symbol") || "");
   }, []);
 
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      forceLogout("You are not logged in. Please login.");
+    }
+  }, []);
+
   //currency_symbol
   const loadMenu = async () => {
-    const res = await axios.get(
+    const res = await api.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
       {
         params: {
@@ -255,7 +265,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, [categoriesList]);
 
   const loadCategories = async () => {
-    const res = await axios.get(
+    const res = await api.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/listitemcategories",
       {
         params: {
@@ -282,7 +292,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     const fetchTables = async () => {
       try {
-        const response = await axios.get(
+        const response = await api.get(
           process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlisttables",
           {
             params: {
@@ -417,7 +427,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return;
     }
 
-    const res = await axios.post(API_URL + "/api/orders/createemptyorder", {
+    const res = await api.post(API_URL + "/api/orders/createemptyorder", {
       g_hash,
       user_id,
     });
@@ -446,17 +456,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
   useEffect(() => {
     async function loadPendingOrders() {
-      const res = await axios.post(API_URL + "/api/orders/sync", {
+      const res = await api.post(API_URL + "/api/orders/sync", {
         g_hash,
         user_id,
       });
 
       if (res.data.is_error) return;
 
-      const loadedOrders = res.data.orders.map((o:any) => ({
+      const loadedOrders = res.data.orders.map((o: any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
-        items: o.items.map((it:any) => ({
+        items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -589,7 +599,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           discount: 0,
           station_id: 1,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m:any) => ({
+          modifiers: li.modifiers.map((m: any) => ({
             group_id: m.groupId,
             option_id: m.optionId,
             name: m.name,
@@ -600,10 +610,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     };
 
     try {
-      const res = await axios.post(
-        API_URL + "/api/orders/updateorder",
-        payload
-      );
+      const res = await api.post(API_URL + "/api/orders/updateorder", payload);
 
       if (res.data.is_error) {
         alert(res.data.error_msg);
@@ -738,7 +745,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
-    const response = await axios.post(
+    const response = await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
       payload
     );
@@ -824,8 +831,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   function mergeTables(t1: number, t2: number) {
-    const o1:any = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2:any = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const o1: any = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
     if (o1 && !o2) {
@@ -844,7 +851,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         tableIds: Array.from(new Set([...o2.tableIds, t1])),
       };
       setOrdersInfo(
-        ordersInfo.map((o:any) => (o.orderId === o2.orderId ? updated : o))
+        ordersInfo.map((o: any) => (o.orderId === o2.orderId ? updated : o))
       );
       return;
     }
@@ -1631,7 +1638,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                       return;
                     }
 
-                    const res = await axios.get(
+                    const res = await api.get(
                       process.env.NEXT_PUBLIC_API_LINK +
                         "/request/api/searchcustomerbyname",
                       { params: { sc_customer_name: q } }
@@ -1809,7 +1816,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                       ic_loyality_point: 0,
                     };
 
-                    const res = await axios.post(
+                    const res = await api.post(
                       process.env.NEXT_PUBLIC_API_LINK +
                         "/request/api/savecustomer",
                       payload

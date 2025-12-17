@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
+import { api } from "@/lib/api";
+import { forceLogout } from "@/lib/logout";
 
 /* ─────────────────────────────────────────
  * Types
@@ -55,7 +57,7 @@ const elapsedMin = (ms: number) =>
  * Page
  * ───────────────────────────────────────── */
 
-export default function KdsClient({ lang }: {lang: "en" | "fr"}) {
+export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [tickets, setTickets] = useState<KdsTicket[]>([]);
   const [query, setQuery] = useState("");
   const [soundOn, setSoundOn] = useState(true);
@@ -90,7 +92,7 @@ export default function KdsClient({ lang }: {lang: "en" | "fr"}) {
         const user_id = localStorage.getItem("user_id");
 
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getstationsname`;
-        const res = await axios.get(url, { params: { g_hash, user_id } });
+        const res = await api.get(url, { params: { g_hash, user_id } });
 
         if (!res.data.is_error) {
           setStations(res.data.lst_kitchens || []);
@@ -107,6 +109,14 @@ export default function KdsClient({ lang }: {lang: "en" | "fr"}) {
     loadStations();
   }, []);
 
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      forceLogout("You are not logged in. Please login.");
+    }
+  }, []);
+
   // ───────── Load pending orders ─────────
   useEffect(() => {
     async function loadPendingOrders() {
@@ -115,7 +125,7 @@ export default function KdsClient({ lang }: {lang: "en" | "fr"}) {
         const user_id = localStorage.getItem("user_id");
 
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getpendingorders`;
-        const res = await axios.get(url, { params: { g_hash, user_id } });
+        const res = await api.get(url, { params: { g_hash, user_id } });
 
         if (res.data.is_error) return;
 
@@ -234,7 +244,7 @@ export default function KdsClient({ lang }: {lang: "en" | "fr"}) {
         console.error("Missing g_hash or user_id");
         return;
       }
-      await axios.post(url, {
+      await api.post(url, {
         g_hash: gHash,
         user_id: userId,
         oi_id: itemId,

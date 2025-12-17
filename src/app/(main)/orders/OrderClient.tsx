@@ -1,15 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Search,
-  FileSpreadsheet,
-  FileText,
-} from "lucide-react";
+import { Search, FileSpreadsheet, FileText } from "lucide-react";
 import "react-day-picker/dist/style.css";
 import { DayPicker } from "react-day-picker";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
+import { api } from "@/lib/api";
+import { forceLogout } from "@/lib/logout";
 
 // ───────────────────────────────
 // Types
@@ -80,7 +78,7 @@ function DatePopup({
   );
 }
 
-export default function OrdersPage({ lang }: {lang: "en" | "fr"}) {
+export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -94,6 +92,14 @@ export default function OrdersPage({ lang }: {lang: "en" | "fr"}) {
   );
 
   const { t } = useI18n(lang);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      forceLogout("You are not logged in. Please login.");
+    }
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -112,7 +118,7 @@ export default function OrdersPage({ lang }: {lang: "en" | "fr"}) {
           params.date_to = dateTo.toISOString().slice(0, 10);
         }
 
-        const res = await axios.get(
+        const res = await api.get(
           process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistoforders",
           { params }
         );
@@ -218,7 +224,9 @@ export default function OrdersPage({ lang }: {lang: "en" | "fr"}) {
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-extrabold text-gray-900">{t.orders.orders}</h1>
+            <h1 className="text-3xl font-extrabold text-gray-900">
+              {t.orders.orders}
+            </h1>
             <p className="text-sm text-gray-600">{t.orders.ordersList}</p>
           </div>
           <div className="flex items-center gap-2">

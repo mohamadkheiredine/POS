@@ -7,7 +7,6 @@ import React, { use, useEffect, useState } from "react";
 import LanguageSwitch from "@/components/shared/language-switch";
 import { useI18n } from "@/hooks/useI18n";
 
-
 export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -61,6 +60,9 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
       localStorage.setItem("store_id", data.store_id);
       localStorage.setItem("company_id", data.company_id);
 
+      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem("expires_in", String(data.expires_in));
+
       router.push("/pos");
       console.log("Login with", { username, password });
     } catch (error) {
@@ -91,9 +93,7 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
           <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">
             {t.login.title}
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            {t.login.subtitle}
-          </p>
+          <p className="mt-1 text-sm text-gray-600">{t.login.subtitle}</p>
 
           <form onSubmit={handleSubmit} className="mt-7 space-y-5">
             {/* Username (floating label) */}
