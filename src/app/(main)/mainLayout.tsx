@@ -138,6 +138,16 @@ export default function MainLayout({
                   label: t.menu.orders,
                   icon: <ClipboardList size={16} />,
                 },
+                {
+                  href: "/opencash",
+                  label: t.menu.open_cash,
+                  icon: <ClipboardList size={16} />,
+                },
+                {
+                  href: "/closecash",
+                  label: t.menu.close_cash,
+                  icon: <ClipboardList size={16} />,
+                },
               ]}
             />
 
