@@ -130,6 +130,9 @@
     "admin": "Administration",
     "users": "Utilisateurs",
     "permissions": "Permissions",
-    "audit_log": "Journal d’audit"
+    "audit_log": "Journal d’audit",
+
+    "open_cash": "Ouvrir la caisse",
+    "close_cash": "Fermer la caisse"
   }
 }
