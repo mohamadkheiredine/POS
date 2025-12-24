@@ -747,11 +747,20 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       if (customerAddress?.trim()) delAddress = customerAddress.trim();
     }
 
+    const firstItem = orderData.items[0];
+    const currencyId = menu.find((m) => m.id === firstItem.itemId)?.cc_id;
+
+    if (!currencyId) {
+      alert("Cannot detect currency for this order.");
+      return;
+    }
+
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
       company_id: localStorage.getItem("company_id"),
+      currency_id: Number(currencyId),
 
       order_type: orderType,
       table_id: orderData.tableIds.join(","),
@@ -1975,7 +1984,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 disabled={!selectedCustomer && !showNewCustomer && posDisabled}
                 className={`w-full mt-4 px-4 py-3 text-sm font-semibold rounded-xl 
     ${
-      !selectedCustomer && !showNewCustomer
+      !selectedCustomer && !showNewCustomer && posDisabled
         ? "bg-gray-300 text-gray-600 cursor-not-allowed"
         : "bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-lg"
     }${
