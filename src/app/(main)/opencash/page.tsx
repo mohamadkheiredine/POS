@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Select from "react-select";
 import { SearchableMenuList } from "@/components/shared/searchableMenuList";
+import { useRouter } from "next/navigation";
+
 
 type BalanceRow = {
   id: string;
@@ -20,6 +22,8 @@ type CurrencyData = {
 /* ---------- component ---------- */
 export default function OpenShift() {
   const [currencies, setCurrencies] = useState<CurrencyData[]>([]);
+
+  const router = useRouter();
 
   const GetListCurrencies = async () => {
     const user_id = localStorage.getItem("user_id");
@@ -168,6 +172,7 @@ export default function OpenShift() {
 
       alert("Cash drawer opened.");
       resetForm();
+      router.replace('/pos');
     } catch (e) {
       alert("Network error. Could not open cash drawer.");
     } finally {

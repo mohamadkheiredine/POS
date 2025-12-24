@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { useRouter } from "next/navigation";
 
 type BalanceRow = {
   id: string;
@@ -20,6 +21,8 @@ export default function CloseShift() {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const router = useRouter();
 
   const resetForm = () => {
     setNote("");
@@ -96,6 +99,7 @@ export default function CloseShift() {
 
       alert("Shift closed successfully.");
       resetForm();
+      router.replace('/pos');
     } catch (e) {
       alert("Network error. Could not close cash drawer.");
     } finally {
