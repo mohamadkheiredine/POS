@@ -6,7 +6,6 @@ import Select from "react-select";
 import { SearchableMenuList } from "@/components/shared/searchableMenuList";
 import { useRouter } from "next/navigation";
 
-
 type BalanceRow = {
   id: string;
   currencyId: string;
@@ -133,16 +132,20 @@ export default function OpenShift() {
     );
   };
 
+  const isValidNumber = (v: string) =>
+    v !== "" && !isNaN(Number(v)) && Number(v) >= 0;
+
   const submitOpen = async () => {
     if (!rows.length) return;
 
     for (const r of rows) {
       if (!r.currencyId) {
-        alert("Choose a currency for all rows.");
+        alert("Please select a currency for all rows.");
         return;
       }
-      if (!r.amount || isNaN(Number(r.amount))) {
-        alert("Enter a valid amount for all rows.");
+
+      if (!isValidNumber(r.amount)) {
+        alert("Opening amount must be a valid non-negative number.");
         return;
       }
     }
@@ -172,7 +175,7 @@ export default function OpenShift() {
 
       alert("Cash drawer opened.");
       resetForm();
-      router.replace('/pos');
+      router.replace("/pos");
     } catch (e) {
       alert("Network error. Could not open cash drawer.");
     } finally {

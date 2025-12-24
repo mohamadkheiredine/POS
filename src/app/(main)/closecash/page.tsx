@@ -41,16 +41,20 @@ export default function CloseShift() {
     );
   };
 
+  const isValidNumber = (v: string) =>
+    v !== "" && !isNaN(Number(v)) && Number(v) >= 0;
+
   const submitClose = async () => {
     if (!rows.length) return;
 
     for (const r of rows) {
       if (!r.currencyId) {
-        alert("Choose a currency for all rows.");
+        alert("Currency is missing.");
         return;
       }
-      if (!r.counted || isNaN(Number(r.counted))) {
-        alert("Enter a valid counted for all rows.");
+
+      if (!isValidNumber(r.counted)) {
+        alert("Counted amount must be a valid non-negative number.");
         return;
       }
     }
@@ -99,7 +103,7 @@ export default function CloseShift() {
 
       alert("Shift closed successfully.");
       resetForm();
-      router.replace('/pos');
+      router.replace("/pos");
     } catch (e) {
       alert("Network error. Could not close cash drawer.");
     } finally {
