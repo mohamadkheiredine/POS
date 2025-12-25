@@ -129,6 +129,9 @@
     "admin": "Admin",
     "users": "Users",
     "permissions": "Permissions",
-    "audit_log": "Audit Log"
+    "audit_log": "Audit Log",
+
+    "open_cash": "Open Cash",
+    "close_cash": "Close Cash"
   }
 }

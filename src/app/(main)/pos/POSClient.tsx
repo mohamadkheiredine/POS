@@ -371,6 +371,37 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const API_URL = process.env.NEXT_PUBLIC_API_LINK;
   const [g_hash, setGHash] = useState<string | null>(null);
   const [user_id, setUserId] = useState<string | null>(null);
+
+  const [hasOpenCash, setHasOpenCash] = useState<boolean | undefined>(
+    undefined
+  );
+
+  const checkOpenCash = async () => {
+    const user_id = localStorage.getItem("user_id");
+    const g_hash = localStorage.getItem("g_hash");
+
+    try {
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/shift/getopencurrencies`,
+        { params: { user_id, g_hash } }
+      );
+
+      if (res.data?.is_error === 0 && Array.isArray(res.data.data)) {
+        setHasOpenCash(true);
+      } else {
+        setHasOpenCash(false);
+      }
+    } catch {
+      setHasOpenCash(false);
+    }
+  };
+
+  useEffect(() => {
+    checkOpenCash();
+  }, []);
+
+  const posDisabled = hasOpenCash === false;
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       setGHash(localStorage.getItem("g_hash"));
@@ -467,7 +498,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         orderId: o.order_id,
         tableIds: o.tables,
         items: o.items.map((it: any) => ({
-        items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -545,7 +575,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
 
-    const newLine: OrderItem = {
+    const newLine: any = {
       uid: uid(),
       itemId: modItem.id,
       name: modItem.name,
@@ -558,7 +588,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       sentToKitchen: false,
     };
 
-    setOrder((o) => ({ ...o, items: [...o.items, newLine] }));
+    setOrder((o:any) => ({ ...o, items: [...o.items, newLine] }));
 
     setOrdersInfo((prev) =>
       prev.map((o) =>
@@ -600,11 +630,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           discount: 0,
           station_id: 1,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m: any) => ({
-            group_id: m.groupId,
-            option_id: m.optionId,
-            name: m.name,
-            price: m.price,
           modifiers: li.modifiers.map((m) => ({
             id: Number(m.optionId),
           })),
@@ -638,17 +663,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const it = menu.find((m) => m.id === editLine.itemId);
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
-    setOrder((o) => ({
+    setOrder((o:any) => ({
       ...o,
-      items: o.items.map((x) => (x.uid === updated.uid ? updated : x)),
+      items: o.items.map((x:any) => (x.uid === updated.uid ? updated : x)),
     }));
     setEditLine(null);
   };
 
   const removeLine = (uidLine: UID) =>
-    setOrder((o) => ({
+    setOrder((o:any) => ({
       ...o,
-      items: o.items.filter((x) => x.uid !== uidLine),
+      items: o.items.filter((x:any) => x.uid !== uidLine),
     }));
 
   const itemsForCurrentTable = useMemo(() => {
@@ -725,11 +750,20 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       if (customerAddress?.trim()) delAddress = customerAddress.trim();
     }
 
+    const firstItem = orderData.items[0];
+    const currencyId = menu.find((m) => m.id === firstItem.itemId)?.cc_id;
+
+    if (!currencyId) {
+      alert("Cannot detect currency for this order.");
+      return;
+    }
+
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
       company_id: localStorage.getItem("company_id"),
+      currency_id: Number(currencyId),
 
       order_type: orderType,
       table_id: orderData.tableIds.join(","),
@@ -902,7 +936,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {t.POS.tables}
             </h2>
             <div className="flex items-center gap-2">
-              <button className="rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50">
+              <button
+                className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+                disabled={posDisabled}
+              >
                 {t.POS.transfer}
               </button>
             </div>
@@ -921,9 +962,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
               return (
                 <button
+                  disabled={posDisabled}
                   key={ta.id}
                   onClick={() => selectTable(ta)}
-                  className={`h-24 rounded-2xl border ${color} p-3 text-left transition hover:bg-orange-50`}
+                  className={`h-24 rounded-2xl border ${color} p-3 text-left transition hover:bg-orange-50${
+                    posDisabled
+                      ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                      : "hover:bg-emerald-700"
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{ta.label}</span>
@@ -953,13 +999,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         <section className="overflow-hidden rounded-3xl bg-white/80 p-4 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
           <div className="mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
             <button
+              disabled={posDisabled}
               onClick={() => setSelectedCategory(0)}
               className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition
       ${
         selectedCategory === 0
           ? "bg-orange-500 text-white border-orange-500"
           : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
-      }`}
+      }${
+                posDisabled
+                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                  : "hover:bg-emerald-700"
+              }`}
             >
               All
             </button>
@@ -967,6 +1018,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             {/* Dynamic categories */}
             {categoriesList.map((cat) => (
               <button
+                disabled={posDisabled}
                 key={cat.id}
                 onClick={() => setSelectedCategory(cat.id)}
                 className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold border transition 
@@ -974,7 +1026,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           selectedCategory === cat.id
             ? "bg-orange-500 text-white border-orange-500"
             : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
-        }`}
+        }${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {cat.name}
               </button>
@@ -990,9 +1046,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               )
               .map((item) => (
                 <button
+                  disabled={posDisabled}
                   key={item.id}
                   onClick={() => addItemStart(item)}
-                  className="flex h-32 flex-col rounded-2xl border border-gray-200 bg-white p-3 text-left transition hover:border-orange-300 hover:bg-orange-50"
+                  className={`flex h-32 flex-col rounded-2xl border border-gray-200 bg-white p-3 text-left transition hover:border-orange-300 hover:bg-orange-50${
+                    posDisabled
+                      ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                      : "hover:bg-emerald-700"
+                  }`}
                 >
                   <span className="line-clamp-2 text-sm font-semibold text-gray-900 leading-tight min-h-[38px]">
                     {item.name}
@@ -1022,16 +1083,44 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50">
+              <button
+                className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+                disabled={posDisabled}
+              >
                 {t.POS.hold}
               </button>
-              <button className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50">
+              <button
+                className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+                disabled={posDisabled}
+              >
                 {t.POS.discount}
               </button>
-              <button className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50">
+              <button
+                className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+                disabled={posDisabled}
+              >
                 <Printer className="h-4 w-4" />
               </button>
-              <button className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50">
+              <button
+                className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+                disabled={posDisabled}
+              >
                 <Receipt className="h-4 w-4" />
               </button>
             </div>
@@ -1046,7 +1135,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               </div>
             ) : (
               <ul className="space-y-2">
-                {itemsForCurrentTable.map((li) => {
+                {itemsForCurrentTable.map((li:any) => {
                   const lineTotal = (li.basePrice + li.priceExtra) * li.qty;
 
                   return (
@@ -1074,7 +1163,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                           {li.modifiers.length > 0 && (
                             <div className="mt-1 text-xs text-gray-600">
                               {li.modifiers
-                                .map((m) => {
+                                .map((m:any) => {
                                   const it = menu.find(
                                     (x) => x.id === li.itemId
                                   );
@@ -1100,11 +1189,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                           <div className="mt-2 flex items-center gap-2">
                             <button
-                              className="rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50"
+                              disabled={posDisabled}
+                              className={`rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50${
+                                posDisabled
+                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                  : "hover:bg-emerald-700"
+                              }`}
                               onClick={() =>
-                                setOrder((o) => ({
+                                setOrder((o:any) => ({
                                   ...o,
-                                  items: o.items.map((x) =>
+                                  items: o.items.map((x:any) =>
                                     x.uid === li.uid
                                       ? { ...x, qty: Math.max(1, x.qty - 1) }
                                       : x
@@ -1120,11 +1214,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                             </span>
 
                             <button
-                              className="rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50"
+                              disabled={posDisabled}
+                              className={`rounded-lg border border-gray-200 bg-white p-1 hover:bg-gray-50${
+                                posDisabled
+                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                  : "hover:bg-emerald-700"
+                              }`}
                               onClick={() =>
-                                setOrder((o) => ({
+                                setOrder((o:any) => ({
                                   ...o,
-                                  items: o.items.map((x) =>
+                                  items: o.items.map((x:any) =>
                                     x.uid === li.uid
                                       ? { ...x, qty: x.qty + 1 }
                                       : x
@@ -1136,14 +1235,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                             </button>
 
                             <button
-                              className="ml-2 inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50"
+                              disabled={posDisabled}
+                              className={`ml-2 inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
+                                posDisabled
+                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                  : "hover:bg-emerald-700"
+                              }`}
                               onClick={() => openEdit(li)}
                             >
                               <Edit3 className="h-3.5 w-3.5" /> {t.POS.edit}
                             </button>
 
                             <button
-                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
+                              disabled={posDisabled}
+                              className={`inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50${
+                                posDisabled
+                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                  : "hover:bg-emerald-700"
+                              }`}
                               onClick={() => removeLine(li.uid)}
                             >
                               <Trash2 className="h-3.5 w-3.5" /> {t.POS.remove}
@@ -1176,8 +1285,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
             {!currentTableId && (
               <button
+                disabled={posDisabled}
                 onClick={() => setCustomerDrawerOpen(true)}
-                className="text-orange-600 text-sm font-semibold hover:underline"
+                className={`text-orange-600 text-sm font-semibold hover:underline${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {selectedCustomer
                   ? selectedCustomer.customer_name
@@ -1211,22 +1325,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
             <div className="flex items-center justify-between gap-2">
               <button
-                disabled={order.items.length === 0}
+                disabled={order.items.length === 0 && posDisabled}
                 onClick={sendToKitchen}
-                className="group inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                className={`group inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <Send className="h-4 w-4" /> {t.POS.sendToKitchen}
               </button>
 
               <button
-                className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                disabled={posDisabled}
+                className={`rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
                 onClick={startNewOrder}
               >
                 {t.POS.newOrder}
               </button>
 
               <button
-                className="group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                disabled={posDisabled}
+                className={`group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
                 onClick={() => {
                   const tableKey = currentTableId ?? 0;
 
@@ -1253,12 +1381,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               </button>
 
               <button
+                disabled={posDisabled}
                 onClick={() => {
                   setMergeMode(true);
                   setFirstMergeTable(null);
                   alert("Select the first table to merge");
                 }}
-                className="rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50"
+                className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {t.POS.merge}
               </button>
@@ -1276,8 +1409,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             <div className="flex items-center justify-between border-b px-5 py-3">
               <div className="font-bold text-gray-900">{modItem.name}</div>
               <button
+                disabled={posDisabled}
                 onClick={() => setModItem(null)}
-                className="rounded-lg p-1 hover:bg-gray-100"
+                className={`rounded-lg p-1 hover:bg-gray-100${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
                 aria-label="Close"
               >
                 <X className="h-5 w-5" />
@@ -1323,13 +1461,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                             );
                             return (
                               <button
+                                disabled={posDisabled}
                                 key={op.id}
                                 className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                               ${
                                 picked
                                   ? "border-orange-300 bg-orange-50"
                                   : "border-gray-200 bg-white hover:bg-gray-50"
-                              }`}
+                              }${
+                                  posDisabled
+                                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                    : "hover:bg-emerald-700"
+                                }`}
                                 onClick={() => toggleModifier(g, op)}
                               >
                                 <span className="flex items-center gap-2">
@@ -1364,7 +1507,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 </div>
                 <div className="mb-4 flex items-center gap-2">
                   <button
-                    className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
+                    disabled={posDisabled}
+                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={() => setModQty((q) => Math.max(1, q - 1))}
                   >
                     <Minus className="h-4 w-4" />
@@ -1373,7 +1521,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {modQty}
                   </div>
                   <button
-                    className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
+                    disabled={posDisabled}
+                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={() => setModQty((q) => q + 1)}
                   >
                     <Plus className="h-4 w-4" />
@@ -1431,14 +1584,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                 <div className="mt-4 flex items-center justify-end gap-2">
                   <button
+                    disabled={posDisabled}
                     onClick={() => setModItem(null)}
-                    className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                    className={`rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                   >
                     {t.POS.cancel}
                   </button>
                   <button
+                    disabled={posDisabled}
                     onClick={confirmAddToOrder}
-                    className="group relative inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                    className={`group relative inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                   >
                     <Plus className="h-4 w-4" /> {t.POS.addToOrder}
                     <span className="pointer-events-none absolute inset-0 -z-10 rounded-2xl bg-amber-300/40 blur-xl opacity-0 transition group-hover:opacity-100"></span>
@@ -1460,8 +1623,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 {t.POS.receiptPreview}
               </h2>
               <button
+                disabled={posDisabled}
                 onClick={() => setReceiptHTML(null)}
-                className="rounded-lg p-1 hover:bg-gray-100"
+                className={`rounded-lg p-1 hover:bg-gray-100${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1478,15 +1646,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             {/* FOOTER with print */}
             <div className="border-t px-6 py-3 flex items-center justify-end gap-2">
               <button
+                disabled={posDisabled}
                 onClick={() => setReceiptHTML(null)}
-                className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                className={`rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {t.POS.close}
               </button>
 
               <button
+                disabled={posDisabled}
                 onClick={() => printReceipt()}
-                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                className={`rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <Printer className="h-4 w-4 inline-block mr-1" />
                 {t.POS.print}
@@ -1512,8 +1690,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 {t.POS.takeawayCustomer}
               </h2>
               <button
+                disabled={posDisabled}
                 onClick={() => setCustomerDrawerOpen(false)}
-                className="p-1 rounded-lg hover:bg-gray-100"
+                className={`p-1 rounded-lg hover:bg-gray-100${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1528,7 +1711,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                   {/* Items */}
                   <div className="space-y-2 text-sm">
-                    {order.items.map((li) => (
+                    {order.items.map((li:any) => (
                       <div key={li.uid} className="space-y-1 border-b pb-2">
                         <div className="flex justify-between">
                           <span>
@@ -1543,7 +1726,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         {li.modifiers.length > 0 && (
                           <div className="text-xs text-gray-600 ml-2">
                             {li.modifiers
-                              .map((m) => {
+                              .map((m:any) => {
                                 const item = menu.find(
                                   (x) => x.id === li.itemId
                                 );
@@ -1601,26 +1784,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     </label>
                     <div className="flex gap-2 mt-2">
                       <button
+                        disabled={posDisabled}
                         onClick={() => setPaymentType("cash")}
                         className={`px-4 py-2 rounded-xl border text-sm font-semibold 
         ${
           paymentType === "cash"
             ? "bg-orange-500 text-white border-orange-500"
             : "bg-white border-gray-300"
-        }
+        }${
+                          posDisabled
+                            ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                            : "hover:bg-emerald-700"
+                        }
       `}
                       >
                         {t.POS.cash}
                       </button>
 
                       <button
+                        disabled={posDisabled}
                         onClick={() => setPaymentType("card")}
                         className={`px-4 py-2 rounded-xl border text-sm font-semibold 
         ${
           paymentType === "card"
             ? "bg-orange-500 text-white border-orange-500"
             : "bg-white border-gray-300"
-        }
+        }${
+                          posDisabled
+                            ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                            : "hover:bg-emerald-700"
+                        }
       `}
                       >
                         {t.POS.card}
@@ -1681,6 +1874,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                     return (
                       <button
+                        disabled={posDisabled}
                         key={c.customer_id}
                         onClick={() => {
                           setSelectedCustomer(c);
@@ -1695,7 +1889,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               isSelected
                 ? "bg-orange-100 border-orange-500 shadow-sm"
                 : "bg-white hover:bg-orange-50 border-gray-200"
-            }`}
+            }${
+                          posDisabled
+                            ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                            : "hover:bg-emerald-700"
+                        }`}
                       >
                         <div className="flex justify-between items-center">
                           <div>
@@ -1738,8 +1936,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {/* Toggle: create new customer */}
               {/* Accordion Title */}
               <button
+                disabled={posDisabled}
                 onClick={() => setShowNewCustomer(!showNewCustomer)}
-                className="w-full flex justify-between items-center px-4 py-3 rounded-xl border text-sm font-semibold bg-white hover:bg-gray-50"
+                className={`w-full flex justify-between items-center px-4 py-3 rounded-xl border text-sm font-semibold bg-white hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {t.POS.addNewCustomer}
                 <span className="text-gray-500">
@@ -1786,13 +1989,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {/* NEW CUSTOMER FORM */}
 
               <button
-                disabled={!selectedCustomer && !showNewCustomer}
+                disabled={!selectedCustomer && !showNewCustomer && posDisabled}
                 className={`w-full mt-4 px-4 py-3 text-sm font-semibold rounded-xl 
     ${
-      !selectedCustomer && !showNewCustomer
+      !selectedCustomer && !showNewCustomer && posDisabled
         ? "bg-gray-300 text-gray-600 cursor-not-allowed"
         : "bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-lg"
-    }`}
+    }${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
                 onClick={async () => {
                   let finalCustomerId = null;
 
@@ -1844,10 +2051,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     });
                   }
 
-                  if (!finalCustomerId) {
-                    return alert("Customer is missing!");
-                  }
-
                   setCustomerDrawerOpen(false);
 
                   // Pass finalCustomerId to your order-saving function
@@ -1868,8 +2071,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 className="text-lg font-bold">Invoice & Payment</h2>
               <button
+                disabled={posDisabled}
                 onClick={() => setPreviewPopupOpen(false)}
-                className="p-1 rounded-lg hover:bg-gray-100"
+                className={`p-1 rounded-lg hover:bg-gray-100${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1882,7 +2090,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <div className="font-semibold text-sm text-gray-700 mb-2">
                   {t.POS.product}
                 </div>
-                {order.items.map((li) => (
+                {order.items.map((li:any) => (
                   <div key={li.uid} className="space-y-1 border-b pb-2">
                     <div className="flex justify-between">
                       <span>
@@ -1897,7 +2105,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {li.modifiers.length > 0 && (
                       <div className="text-xs text-gray-600 ml-2">
                         {li.modifiers
-                          .map((m) => {
+                          .map((m:any) => {
                             const item = menu.find((x) => x.id === li.itemId);
                             const g = item?.modifierGroups?.find(
                               (gg) => gg.id === m.groupId
@@ -1942,17 +2150,27 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             {/* Footer */}
             <div className="border-t px-6 py-4 flex justify-end gap-2">
               <button
+                disabled={posDisabled}
                 onClick={() => setPreviewPopupOpen(false)}
-                className="rounded-xl border px-4 py-2 font-semibold"
+                className={`rounded-xl border px-4 py-2 font-semibold${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 {t.POS.cancel}
               </button>
               <button
+                disabled={posDisabled}
                 onClick={async () => {
                   setPreviewPopupOpen(false);
                   await saveOrderToDatabase();
                 }}
-                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 text-white px-5 py-2 font-semibold shadow-lg"
+                className={`rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 text-white px-5 py-2 font-semibold shadow-lg${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 Save Order
               </button>
@@ -1972,8 +2190,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             <div className="flex items-center justify-between border-b px-4 py-3">
               <div className="font-bold">{editLine.name}</div>
               <button
+                disabled={posDisabled}
                 onClick={() => setEditLine(null)}
-                className="rounded-lg p-1 hover:bg-gray-100"
+                className={`rounded-lg p-1 hover:bg-gray-100${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1984,7 +2207,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <span className="text-sm text-gray-600">{t.POS.quantity}</span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
+                    disabled={posDisabled}
+                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={() =>
                       setEditLine((l) =>
                         l ? { ...l, qty: Math.max(1, l.qty - 1) } : l
@@ -1997,7 +2225,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {editLine.qty}
                   </span>
                   <button
-                    className="rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50"
+                    disabled={posDisabled}
+                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={() =>
                       setEditLine((l) => (l ? { ...l, qty: l.qty + 1 } : l))
                     }
@@ -2129,13 +2362,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                 );
                                 return (
                                   <button
+                                    disabled={posDisabled}
                                     key={op.id}
                                     className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                                 ${
                                   picked
                                     ? "border-orange-300 bg-orange-50"
                                     : "border-gray-200 bg-white hover:bg-gray-50"
-                                }`}
+                                }${
+                                      posDisabled
+                                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                                        : "hover:bg-emerald-700"
+                                    }`}
                                     onClick={() => toggle(op)}
                                   >
                                     <span className="flex items-center gap-2">
@@ -2211,7 +2449,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
               <div className="flex items-center justify-between">
                 <button
-                  className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+                  disabled={posDisabled}
+                  className={`inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50${
+                    posDisabled
+                      ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                      : "hover:bg-emerald-700"
+                  }`}
                   onClick={() => {
                     removeLine(editLine.uid);
                     setEditLine(null);
@@ -2221,13 +2464,23 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 </button>
                 <div className="flex items-center gap-2">
                   <button
-                    className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+                    disabled={posDisabled}
+                    className={`rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={() => setEditLine(null)}
                   >
                     Cancel
                   </button>
                   <button
-                    className="group relative inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105"
+                    disabled={posDisabled}
+                    className={`group relative inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
+                      posDisabled
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                        : "hover:bg-emerald-700"
+                    }`}
                     onClick={applyEdit}
                   >
                     <SquarePen className="h-4 w-4" /> {t.POS.applyChanges}
