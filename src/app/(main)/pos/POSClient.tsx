@@ -25,7 +25,7 @@ import { forceLogout } from "@/lib/logout";
 /* =============================================================================
  * Types
  * ========================================================================== */
-type UID = string;
+type UID = number;
 
 type KitchenStation = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
@@ -236,7 +236,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 type: "optional",
                 maxSelect: 0,
                 options: modifiers.map((m) => ({
-                  id: "opt-" + m.id,
+                  id: m.id,
                   name: m.name,
                   priceDelta: Number(m.price),
                 })),
@@ -323,7 +323,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [tables, setTables] = useState<Table[]>([]);
   const [currentTableId, setCurrentTableId] = useState<number | null>(null);
   const [activeTables, setActiveTables] = useState<number[]>([]);
-  const [order, setOrder] = useState<Order>({
+  const [order, setOrder] = useState<any>({
     id: uid(),
     guests: 0,
     items: [],
@@ -390,7 +390,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const subtotal = useMemo(
     () =>
       order.items.reduce(
-        (s, li) => s + (li.basePrice + li.priceExtra) * li.qty,
+        (s:any, li:any) => s + (li.basePrice + li.priceExtra) * li.qty,
         0
       ),
     [order.items]
@@ -466,6 +466,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const loadedOrders = res.data.orders.map((o: any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
+        items: o.items.map((it: any) => ({
         items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
@@ -604,6 +605,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             option_id: m.optionId,
             name: m.name,
             price: m.price,
+          modifiers: li.modifiers.map((m) => ({
+            id: Number(m.optionId),
           })),
         }))
       ),
@@ -688,8 +691,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       station_id: 1,
       notes: li.note || "",
       modifiers: li.modifiers.map((m) => ({
-        group_id: m.groupId,
-        option_id: m.optionId,
+        id: m.optionId,
         name:
           menu
             .find((it) => it.id === li.itemId)
@@ -745,10 +747,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
+    console.log("before ----------------");
+    console.log("PAYLOAD -----", payload);
+
     const response = await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
       payload
     );
+    console.log("response ", response);
 
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
@@ -835,6 +841,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
+
     if (o1 && !o2) {
       const updated = {
         ...o1,
@@ -874,7 +881,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (currentTableId === t1 || currentTableId === t2) {
       setCurrentOrderId(merged.orderId);
       setCurrentTableId(t1);
-      setOrder((prev) => ({
+      setOrder((prev:any) => ({
         ...prev,
         id: merged.orderId,
         items: merged.items,
