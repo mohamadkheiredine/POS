@@ -22,6 +22,14 @@ type Order = {
   createdAt: string;
 };
 
+type DateFilter =
+  | "today"
+  | "currentdate"
+  | "yesterday"
+  | "lastweek"
+  | "lastmonth"
+  | "daterange";
+
 // Utils
 const money = (n: number) =>
   `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -91,6 +99,8 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
     { open: false, order: null }
   );
 
+  const [dateFilter, setDateFilter] = useState<DateFilter>("today");
+
   const { t } = useI18n(lang);
 
   useEffect(() => {
@@ -102,20 +112,19 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    const fetchOrders = async () => {
       setLoading(true);
 
       try {
         const params: any = {
           g_hash: localStorage.getItem("g_hash"),
           user_id: localStorage.getItem("user_id"),
+          filter: dateFilter,
         };
 
-        if (dateFrom) {
-          params.date_from = dateFrom.toISOString().slice(0, 10); // YYYY-MM-DD
-        }
-        if (dateTo) {
-          params.date_to = dateTo.toISOString().slice(0, 10);
+        if (dateFilter === "daterange") {
+          if (dateFrom) params.date_from = dateFrom.toISOString().slice(0, 10);
+          if (dateTo) params.date_to = dateTo.toISOString().slice(0, 10);
         }
 
         const res = await api.get(
@@ -136,16 +145,15 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
         } else {
           setOrders([]);
         }
-      } catch (err) {
-        console.error("Fetch orders error:", err);
+      } catch (e) {
         setOrders([]);
       } finally {
         setLoading(false);
       }
-    }, 300);
+    };
 
-    return () => clearTimeout(timer);
-  }, [dateFrom, dateTo]);
+    fetchOrders();
+  }, [dateFilter, dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -246,23 +254,57 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 bg-white p-3 rounded-2xl shadow-sm border">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          </div>
+        {/* Filters */}
+<div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-white p-3 shadow-sm">
+  {/* Search */}
+  <div className="relative w-56">
+    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+    <input
+      type="text"
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      placeholder="search..."
+      className="w-full rounded-2xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+    />
+  </div>
 
-          <DatePopup
-            label="From"
-            selected={dateFrom}
-            onSelect={(d) => setDateFrom(d)}
-          />
+  {/* Date filter dropdown */}
+  <select
+    value={dateFilter}
+    onChange={(e) => {
+      setDateFilter(e.target.value as DateFilter);
+      if (e.target.value !== "daterange") {
+        setDateFrom(undefined);
+        setDateTo(undefined);
+      }
+    }}
+    className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+  >
+    <option value="currentdate">Current Shift (Open → Close)</option>
+    <option value="today">Today</option>
+    <option value="yesterday">Yesterday</option>
+    <option value="lastweek">Last Week</option>
+    <option value="lastmonth">Last Month</option>
+    <option value="daterange">Date Range</option>
+  </select>
 
-          <DatePopup
-            label="To"
-            selected={dateTo}
-            onSelect={(d) => setDateTo(d)}
-          />
-        </div>
+  {/* Date range pickers */}
+  {dateFilter === "daterange" && (
+    <div className="flex items-center gap-2">
+      <DatePopup
+        label="From"
+        selected={dateFrom}
+        onSelect={(d) => setDateFrom(d)}
+      />
+      <DatePopup
+        label="To"
+        selected={dateTo}
+        onSelect={(d) => setDateTo(d)}
+      />
+    </div>
+  )}
+</div>
+
 
         {/* Table */}
         <div className="rounded-3xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
