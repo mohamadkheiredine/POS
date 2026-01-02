@@ -101,6 +101,16 @@ type KitchenStationDB = {
   ks_name: string;
 };
 
+type AllowedCurrency = {
+  id: number;
+  storeId?: number;
+  currencyId: number;
+  companyId?: number;
+  rate: number;
+  currencyCode: string;
+  currencyName: string;
+};
+
 type KitchenRoute = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
 /* =============================================================================
@@ -157,6 +167,73 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [mergeMode, setMergeMode] = useState(false);
   const [firstMergeTable, setFirstMergeTable] = useState<number | null>(null);
 
+  const [allowedCurrencies, setAllowedCurrencies] = useState<AllowedCurrency[]>(
+    []
+  );
+  const [currencyRate, setCurrencyRate] = useState<number>(1);
+
+  const [selectedCurrencyId, setSelectedCurrencyId] = useState<number | null>(
+    null
+  );
+
+  const convertPrice = (price: number) => {
+    return price * currencyRate;
+  };
+
+  useEffect(() => {
+    const loadAllowedCurrencies = async () => {
+      const res = await api.get(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/allowedcurrencies/getallowedcurrencies`,
+        {
+          params: {
+            g_hash: localStorage.getItem("g_hash"),
+            user_id: localStorage.getItem("user_id"),
+            store_id: localStorage.getItem("store_id"),
+            company_id: localStorage.getItem("company_id"),
+          },
+        }
+      );
+
+      if (res.data.is_error === 1) return;
+
+      const mappedCurrencies = res.data.allowed_currencies.map((c: any) => ({
+        id: c.ac_id,
+        currencyId: c.ac_currency_id,
+        rate: Number(c.ac_rate_to_original),
+        currencyCode: c.cc_currency_code,
+        currencyName: c.cc_currency_name,
+      }));
+
+      setAllowedCurrencies(mappedCurrencies);
+
+      // 🔑 apply default currency from localStorage
+      const storedSymbol = localStorage.getItem("currency_symbol");
+
+      if (storedSymbol) {
+        const defaultCurrency = mappedCurrencies.find(
+          (c: any) => c.currencyCode === storedSymbol
+        );
+
+        if (defaultCurrency) {
+          setSelectedCurrencyId(defaultCurrency.id);
+          setCurrencyRate(defaultCurrency.rate);
+          setCurrencySymbol(defaultCurrency.currencyCode);
+        }
+      } else {
+        // fallback: first allowed currency
+        const first = mappedCurrencies[0];
+        if (first) {
+          setSelectedCurrencyId(first.id);
+          setCurrencyRate(first.rate);
+          setCurrencySymbol(first.currencyCode);
+          localStorage.setItem("currency_symbol", first.currencyCode);
+        }
+      }
+    };
+
+    loadAllowedCurrencies();
+  }, []);
+
   const [previewPopupOpen, setPreviewPopupOpen] = useState(false);
   const [previewTotals, setPreviewTotals] = useState({
     subtotal: 0,
@@ -194,7 +271,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     loadKitchenStations();
   }, []);
-
 
   const { t } = useI18n(lang);
 
@@ -236,7 +312,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
   }, []);
 
-  //currency_symbol
   const loadMenu = async () => {
     const res = await api.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
@@ -450,21 +525,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     });
   }, [search, category, menu]);
 
-  const subtotal = useMemo(
+  const subtotalOriginal = useMemo(
     () =>
       order.items.reduce(
-        (s:any, li:any) => s + (li.basePrice + li.priceExtra) * li.qty,
+        (s: any, li: any) => s + (li.basePrice + li.priceExtra) * li.qty,
         0
       ),
     [order.items]
   );
-  const tax = subtotal * 0.11;
-  const total = subtotal + tax;
 
-  
+  const taxOriginal = subtotalOriginal * 0.11;
+  const totalOriginal = subtotalOriginal + taxOriginal;
+
+  const subtotal = convertPrice(subtotalOriginal);
+  const tax = convertPrice(taxOriginal);
+  const total = convertPrice(totalOriginal);
+
   function mergeTables(t1: number, t2: number) {
-    const o1:  any = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2:  any = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const o1: any = ordersInfo.find((o) => o.tableIds.includes(t1));
+    const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
 
     if (!o1 && !o2) return alert("Both tables have no orders");
 
@@ -484,7 +563,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         tableIds: Array.from(new Set([...o2.tableIds, t1])),
       };
       setOrdersInfo(
-        ordersInfo.map((o:  any) => (o.orderId === o2.orderId ? updated : o))
+        ordersInfo.map((o: any) => (o.orderId === o2.orderId ? updated : o))
       );
       return;
     }
@@ -507,7 +586,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (currentTableId === t1 || currentTableId === t2) {
       setCurrentOrderId(merged.orderId);
       setCurrentTableId(t1);
-      setOrder((prev:any) => ({
+      setOrder((prev: any) => ({
         ...prev,
         id: merged.orderId,
         items: merged.items,
@@ -574,8 +653,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     async function loadPendingOrders() {
       const res = await api.post(API_URL + "/api/orders/sync", {
-        g_hash,
-        user_id,
+        g_hash: localStorage.getItem("g_hash"),
+        user_id: localStorage.getItem("user_id"),
       });
 
       if (res.data.is_error) return;
@@ -583,7 +662,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const loadedOrders = res.data.orders.map((o: any) => ({
         orderId: o.order_id,
         tableIds: o.tables,
-        items: o.items.map((it:  any) => ({
+        items: o.items.map((it: any) => ({
           uid: uid(),
           itemId: it.oi_item_id,
           qty: it.oi_quantity,
@@ -610,8 +689,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
 
     const selected: AppliedModifier[] = [];
-    item.modifierGroups?.forEach((g:any) => {
-      g.options.forEach((op:any) => {
+    item.modifierGroups?.forEach((g: any) => {
+      g.options.forEach((op: any) => {
         if (op.default) selected.push({ groupId: g.id, optionId: op.id });
       });
     });
@@ -674,7 +753,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       sentToKitchen: false,
     };
 
-    setOrder((o:any) => ({ ...o, items: [...o.items, newLine] }));
+    setOrder((o: any) => ({ ...o, items: [...o.items, newLine] }));
 
     setOrdersInfo((prev) =>
       prev.map((o) =>
@@ -702,9 +781,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_type: "dine_in",
       table_ids: orderData.tableIds.join(","),
 
-      sub_total: subtotal,
+      sub_total: subtotalOriginal,
+
       discount: 0,
-      total: total,
+      total: totalOriginal,
 
       order_items: JSON.stringify(
         orderData.items.map((li) => ({
@@ -722,19 +802,21 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     };
 
     try {
-    const res = await axios.post(API_URL + "/api/orders/updateorder", payload);
+      const res = await axios.post(
+        API_URL + "/api/orders/updateorder",
+        payload
+      );
 
-    if (res.data.is_error) {
-      alert(res.data.error_msg);
-      return;
-    }
+      if (res.data.is_error) {
+        alert(res.data.error_msg);
+        return;
+      }
 
-    alert("Order sent to kitchen (print queued)");
+      alert("Order sent to kitchen (print queued)");
 
-    setOrdersInfo((prev) => prev.filter((o) => o.orderId !== order.id));
-    setCurrentTableId(null);
-  } catch (error) {
-  }
+      setOrdersInfo((prev) => prev.filter((o) => o.orderId !== order.id));
+      setCurrentTableId(null);
+    } catch (error) {}
   };
 
   /* -------------------- edit line -------------------- */
@@ -742,20 +824,20 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const applyEdit = () => {
     if (!editLine) return;
     // Recalculate extra (in case modifiers changed)
-    const it:any = menu.find((m) => m.id === editLine.itemId);
+    const it: any = menu.find((m) => m.id === editLine.itemId);
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
-    setOrder((o:any) => ({
+    setOrder((o: any) => ({
       ...o,
-      items: o.items.map((x:any) => (x.uid === updated.uid ? updated : x)),
+      items: o.items.map((x: any) => (x.uid === updated.uid ? updated : x)),
     }));
     setEditLine(null);
   };
 
   const removeLine = (uidLine: UID) =>
-    setOrder((o:any) => ({
+    setOrder((o: any) => ({
       ...o,
-      items: o.items.filter((x:any) => x.uid !== uidLine),
+      items: o.items.filter((x: any) => x.uid !== uidLine),
     }));
 
   const itemsForCurrentTable = useMemo(() => {
@@ -776,6 +858,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const orderType = isTakeaway ? "takeaway" : "dine_in";
 
+    const baseCurrencyId = Number(localStorage.getItem("company_currency"));
+
+    if (!baseCurrencyId) {
+      alert("Company base currency is missing");
+      return;
+    }
+
     let orderData = ordersInfo.find((o) => o.tableIds.includes(tableKey));
 
     if (!orderData) {
@@ -790,10 +879,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return alert("No items to save");
     }
 
+    const selectedCur = allowedCurrencies.find(
+      (c) => c.id === selectedCurrencyId
+    );
+    const displayRate = selectedCur?.rate ?? 1;
+    const displayCode = selectedCur?.currencyCode ?? CurrencySymbol;
+
     const formattedItems = orderData.items.map((li) => ({
       item_id: Number(li.itemId),
       quantity: li.qty,
-      price: li.basePrice + li.priceExtra,
+      price: (li.basePrice + li.priceExtra) * displayRate,
       discount: 0,
       station_id: 1,
       notes: li.note || "",
@@ -802,13 +897,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         name:
           menu
             .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g:any) => g.id === m.groupId)
-            ?.options.find((o:any) => o.id === m.optionId)?.name || "",
+            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
+            ?.options.find((o: any) => o.id === m.optionId)?.name || "",
         price:
           menu
             .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g:any) => g.id === m.groupId)
-            ?.options.find((o:any) => o.id === m.optionId)?.priceDelta || 0,
+            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
+            ?.options.find((o: any) => o.id === m.optionId)?.priceDelta || 0,
       })),
     }));
 
@@ -840,15 +935,31 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return;
     }
 
+    const subTotalBase = subtotalOriginal;
+    const taxBase = subTotalBase * 0.11;
+    const totalBase = subTotalBase + taxBase;
+
+    const subTotalDisplay = convertPrice(subTotalBase);
+    const totalDisplay = convertPrice(totalBase);
+
+    const displayCurrencyId = selectedCur?.currencyId; // <-- ac_currency_id
+    console.log("--------------------", displayCurrencyId);
+
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
       company_id: localStorage.getItem("company_id"),
-      currency_id: Number(currencyId),
+
+      currency_id: baseCurrencyId,
+      currency_display_id: Number(displayCurrencyId),
+      currency_display_code: displayCode,
+      currency_display_rate: displayRate,
 
       order_type: orderType,
       table_id: orderData.tableIds.join(","),
+
+      discount: 0,
 
       customer_id: finalCustomerId ?? customer_id,
       delcustomername: delName,
@@ -857,20 +968,19 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       customer_type: customerType,
 
-      sub_total: subtotal,
-      discount: 0,
-      total: total,
+      sub_total: subTotalDisplay,
+      total: totalDisplay,
+
+      sub_total_display: subTotalDisplay,
+      total_display: totalDisplay,
+
       order_items: JSON.stringify(formattedItems),
     };
-
-    console.log("before ----------------");
-    console.log("PAYLOAD -----", payload);
 
     const response = await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
       payload
     );
-    console.log("response ", response);
 
     if (response.data.is_error === 1) return alert(response.data.error_msg);
 
@@ -951,7 +1061,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       status: "open",
     });
   };
-
 
   /* -------------------- render -------------------- */
   return (
@@ -1091,7 +1200,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                   <div className="flex-1"></div>
                   <div className="text-sm font-bold text-gray-900">
-                    {item.currency_code} {money(item.price)}
+                    {CurrencySymbol} {money(convertPrice(item.price))}
                   </div>
 
                   <span className="mt-1 inline-block max-w-[120px] truncate text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
@@ -1165,8 +1274,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               </div>
             ) : (
               <ul className="space-y-2">
-                {itemsForCurrentTable.map((li:any) => {
-                  const lineTotal = (li.basePrice + li.priceExtra) * li.qty;
+                {itemsForCurrentTable.map((li: any) => {
+                  const unitDisplay = convertPrice(
+                    li.basePrice + li.priceExtra
+                  );
+                  const lineTotalDisplay = unitDisplay * li.qty;
 
                   return (
                     <li
@@ -1193,15 +1305,15 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                           {li.modifiers.length > 0 && (
                             <div className="mt-1 text-xs text-gray-600">
                               {li.modifiers
-                                .map((m:any) => {
+                                .map((m: any) => {
                                   const it = menu.find(
                                     (x) => x.id === li.itemId
                                   );
                                   const g = it?.modifierGroups?.find(
-                                    (gg:any) => gg.id === m.groupId
+                                    (gg: any) => gg.id === m.groupId
                                   );
                                   const o = g?.options.find(
-                                    (oo:any) => oo.id === m.optionId
+                                    (oo: any) => oo.id === m.optionId
                                   );
                                   return o?.name;
                                 })
@@ -1226,9 +1338,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   : "hover:bg-emerald-700"
                               }`}
                               onClick={() =>
-                                setOrder((o:any) => ({
+                                setOrder((o: any) => ({
                                   ...o,
-                                  items: o.items.map((x:any) =>
+                                  items: o.items.map((x: any) =>
                                     x.uid === li.uid
                                       ? { ...x, qty: Math.max(1, x.qty - 1) }
                                       : x
@@ -1251,9 +1363,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   : "hover:bg-emerald-700"
                               }`}
                               onClick={() =>
-                                setOrder((o:any) => ({
+                                setOrder((o: any) => ({
                                   ...o,
-                                  items: o.items.map((x:any) =>
+                                  items: o.items.map((x: any) =>
                                     x.uid === li.uid
                                       ? { ...x, qty: x.qty + 1 }
                                       : x
@@ -1292,14 +1404,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                         <div className="text-right">
                           <div className="text-sm font-extrabold text-gray-900">
-                            {CurrencySymbol} {money(lineTotal)}
+                            {CurrencySymbol} {money(lineTotalDisplay)}
                           </div>
-                          <div className="text-xs text-gray-500">
-                            {CurrencySymbol} {money(li.basePrice)} {t.POS.base}
+                          {/* <div className="text-xs text-gray-500">
+                            {money(li.basePrice)} {t.POS.base}
                             {li.priceExtra
                               ? ` + ${money(li.priceExtra)} opts`
                               : ""}
-                          </div>
+                          </div> */}
                         </div>
                       </div>
                     </li>
@@ -1350,6 +1462,32 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <span className="font-extrabold text-gray-900">
                   {CurrencySymbol} {money(total)}
                 </span>
+              </div>
+
+              {/* Currency Selector */}
+              <div className="mt-3">
+                <select
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                  value={selectedCurrencyId ?? ""}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    setSelectedCurrencyId(id);
+
+                    const cur = allowedCurrencies.find((c) => c.id === id);
+                    if (!cur) return;
+
+                    setCurrencyRate(cur.rate);
+                    setCurrencySymbol(cur.currencyCode);
+
+                    localStorage.setItem("currency_symbol", cur.currencyCode);
+                  }}
+                >
+                  {allowedCurrencies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.currencyCode} — {c.currencyName}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -1460,7 +1598,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {/* Groups */}
               {USE_MODIFIERS && (
                 <div className="space-y-4">
-                  {modItem.modifierGroups?.map((g:any) => {
+                  {modItem.modifierGroups?.map((g: any) => {
                     const inGroup = modSelected.filter(
                       (s) => s.groupId === g.id
                     );
@@ -1485,7 +1623,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                           </div>
                         </div>
                         <div className="space-y-1">
-                          {g.options.map((op:any) => {
+                          {g.options.map((op: any) => {
                             const picked = inGroup.some(
                               (s) => s.optionId === op.id
                             );
@@ -1567,9 +1705,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <ul className="mb-4 space-y-1 text-sm">
                   {modSelected.map((m) => {
                     const g = modItem.modifierGroups?.find(
-                      (gg:any) => gg.id === m.groupId
+                      (gg: any) => gg.id === m.groupId
                     );
-                    const o = g?.options.find((oo:any) => oo.id === m.optionId);
+                    const o = g?.options.find(
+                      (oo: any) => oo.id === m.optionId
+                    );
                     return (
                       <li
                         key={`${m.groupId}-${m.optionId}`}
@@ -1602,12 +1742,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                   <span className="text-lg font-extrabold text-orange-700">
                     {CurrencySymbol}{" "}
                     {money(
-                      (modItem.price +
-                        priceFromModifiers(
-                          modItem.modifierGroups,
-                          modSelected
-                        )) *
-                        modQty
+                      convertPrice(
+                        modItem.price +
+                          priceFromModifiers(
+                            modItem.modifierGroups,
+                            modSelected
+                          )
+                      ) * modQty
                     )}
                   </span>
                 </div>
@@ -1741,7 +1882,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                   {/* Items */}
                   <div className="space-y-2 text-sm">
-                    {order.items.map((li:any) => (
+                    {order.items.map((li: any) => (
                       <div key={li.uid} className="space-y-1 border-b pb-2">
                         <div className="flex justify-between">
                           <span>
@@ -1756,15 +1897,15 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         {li.modifiers.length > 0 && (
                           <div className="text-xs text-gray-600 ml-2">
                             {li.modifiers
-                              .map((m:any) => {
+                              .map((m: any) => {
                                 const item = menu.find(
                                   (x) => x.id === li.itemId
                                 );
                                 const g = item?.modifierGroups?.find(
-                                  (gg:any) => gg.id === m.groupId
+                                  (gg: any) => gg.id === m.groupId
                                 );
                                 const o = g?.options.find(
-                                  (oo:any) => oo.id === m.optionId
+                                  (oo: any) => oo.id === m.optionId
                                 );
                                 return `${o?.name} (${money(
                                   o?.priceDelta || 0
@@ -2120,7 +2261,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <div className="font-semibold text-sm text-gray-700 mb-2">
                   {t.POS.product}
                 </div>
-                {order.items.map((li:any) => (
+                {order.items.map((li: any) => (
                   <div key={li.uid} className="space-y-1 border-b pb-2">
                     <div className="flex justify-between">
                       <span>
@@ -2135,13 +2276,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {li.modifiers.length > 0 && (
                       <div className="text-xs text-gray-600 ml-2">
                         {li.modifiers
-                          .map((m:any) => {
+                          .map((m: any) => {
                             const item = menu.find((x) => x.id === li.itemId);
                             const g = item?.modifierGroups?.find(
-                              (gg:any) => gg.id === m.groupId
+                              (gg: any) => gg.id === m.groupId
                             );
                             const o = g?.options.find(
-                              (oo:any) => oo.id === m.optionId
+                              (oo: any) => oo.id === m.optionId
                             );
                             return `${o?.name} (${money(o?.priceDelta || 0)})`;
                           })
@@ -2244,7 +2385,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         : "hover:bg-emerald-700"
                     }`}
                     onClick={() =>
-                      setEditLine((l:any) =>
+                      setEditLine((l: any) =>
                         l ? { ...l, qty: Math.max(1, l.qty - 1) } : l
                       )
                     }
@@ -2262,7 +2403,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         : "hover:bg-emerald-700"
                     }`}
                     onClick={() =>
-                      setEditLine((l:any) => (l ? { ...l, qty: l.qty + 1 } : l))
+                      setEditLine((l: any) =>
+                        l ? { ...l, qty: l.qty + 1 } : l
+                      )
                     }
                   >
                     <Plus className="h-4 w-4" />
@@ -2279,7 +2422,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                   <select
                     value={editLine.kitchen}
                     onChange={(e) =>
-                      setEditLine((l:any) =>
+                      setEditLine((l: any) =>
                         l
                           ? { ...l, kitchen: e.target.value as KitchenRoute }
                           : l
@@ -2303,21 +2446,22 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                   <div className="space-y-3">
                     {menu
                       .find((m) => m.id === editLine.itemId)
-                      ?.modifierGroups?.map((g:any) => {
+                      ?.modifierGroups?.map((g: any) => {
                         const lineInGroup = editLine.modifiers.filter(
-                          (s:any) => s.groupId === g.id
+                          (s: any) => s.groupId === g.id
                         );
                         const max =
                           g.maxSelect ?? (g.type === "required" ? 1 : 0);
                         const toggle = (op: ModifierOption) => {
-                          setEditLine((l:any) => {
+                          setEditLine((l: any) => {
                             if (!l) return l;
                             const exists = l.modifiers.some(
-                              (s:any) => s.groupId === g.id && s.optionId === op.id
+                              (s: any) =>
+                                s.groupId === g.id && s.optionId === op.id
                             );
                             if (g.type === "required" && (max === 1 || !max)) {
                               const filtered = l.modifiers.filter(
-                                (s:any) => s.groupId !== g.id
+                                (s: any) => s.groupId !== g.id
                               );
                               return exists
                                 ? { ...l, modifiers: filtered }
@@ -2333,7 +2477,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                               return {
                                 ...l,
                                 modifiers: l.modifiers.filter(
-                                  (s:any) =>
+                                  (s: any) =>
                                     !(
                                       s.groupId === g.id && s.optionId === op.id
                                     )
@@ -2341,11 +2485,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                               };
                             } else {
                               const inG = l.modifiers.filter(
-                                (s:any) => s.groupId === g.id
+                                (s: any) => s.groupId === g.id
                               );
                               if (max && inG.length >= max) {
                                 const others = l.modifiers.filter(
-                                  (s:any) => s.groupId !== g.id
+                                  (s: any) => s.groupId !== g.id
                                 );
                                 const keep = inG.slice(1);
                                 return {
@@ -2386,9 +2530,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                               </div>
                             </div>
                             <div className="space-y-1">
-                              {g.options.map((op:any) => {
+                              {g.options.map((op: any) => {
                                 const picked = lineInGroup.some(
-                                  (s:any) => s.optionId === op.id
+                                  (s: any) => s.optionId === op.id
                                 );
                                 return (
                                   <button
@@ -2441,7 +2585,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                   rows={3}
                   value={editLine.note ?? ""}
                   onChange={(e) =>
-                    setEditLine((l:any) => (l ? { ...l, note: e.target.value } : l))
+                    setEditLine((l: any) =>
+                      l ? { ...l, note: e.target.value } : l
+                    )
                   }
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
                   placeholder="e.g., Well-done, extra sauce…"
