@@ -21,6 +21,7 @@ import { useI18n } from "@/hooks/useI18n";
 import LanguageSwitch from "@/components/shared/language-switch";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
+import { PlusSquare } from "lucide-react";
 
 /* =============================================================================
  * Types
@@ -942,8 +943,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const subTotalDisplay = convertPrice(subTotalBase);
     const totalDisplay = convertPrice(totalBase);
 
-    const displayCurrencyId = selectedCur?.currencyId; // <-- ac_currency_id
-    console.log("--------------------", displayCurrencyId);
+    const displayCurrencyId = selectedCur?.currencyId;
 
     const payload = {
       g_hash: localStorage.getItem("g_hash"),
@@ -1085,6 +1085,22 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               >
                 {t.POS.transfer}
               </button>
+
+              <button
+                disabled={posDisabled}
+                onClick={() => {
+                  setMergeMode(true);
+                  setFirstMergeTable(null);
+                  alert("Select the first table to merge");
+                }}
+                className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
+                  posDisabled
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                    : "hover:bg-emerald-700"
+                }`}
+              >
+                {t.POS.merge}
+              </button>
             </div>
           </div>
 
@@ -1177,7 +1193,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           </div>
 
           {/* ======================== ITEMS GRID ======================== */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {filteredMenu
               .filter(
                 (m) =>
@@ -1242,6 +1258,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               >
                 {t.POS.discount}
               </button>
+
+              <button
+                disabled={posDisabled}
+                onClick={startNewOrder}
+                className={`inline-flex items-center gap-2
+    rounded-xl border border-gray-200
+    bg-white px-3 py-2
+    text-xs font-semibold text-gray-800
+    hover:bg-gray-50
+    ${
+      posDisabled
+        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+        : ""
+    }`}
+              >
+                <PlusSquare className="h-4 w-4" />
+              </button>
+
               <button
                 className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
                   posDisabled
@@ -1464,38 +1498,64 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 </span>
               </div>
 
-              {/* Currency Selector */}
-              <div className="mt-3">
-                <select
-                  className="w-full rounded-lg border px-3 py-2 text-sm"
-                  value={selectedCurrencyId ?? ""}
-                  onChange={(e) => {
-                    const id = Number(e.target.value);
-                    setSelectedCurrencyId(id);
-
-                    const cur = allowedCurrencies.find((c) => c.id === id);
-                    if (!cur) return;
-
-                    setCurrencyRate(cur.rate);
-                    setCurrencySymbol(cur.currencyCode);
-
-                    localStorage.setItem("currency_symbol", cur.currencyCode);
-                  }}
+              {/* Currency Buttons */}
+              {allowedCurrencies.length > 1 && (
+                <div
+                  className={`mt-3 grid gap-2
+      ${
+        allowedCurrencies.length <= 3
+          ? `grid-cols-${allowedCurrencies.length}`
+          : "grid-cols-2"
+      }
+    `}
                 >
-                  {allowedCurrencies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.currencyCode} — {c.currencyName}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  {allowedCurrencies.map((c) => {
+                    const active = selectedCurrencyId === c.id;
+
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        disabled={posDisabled}
+                        onClick={() => {
+                          setSelectedCurrencyId(c.id);
+                          setCurrencyRate(c.rate);
+                          setCurrencySymbol(c.currencyCode);
+                          localStorage.setItem(
+                            "currency_symbol",
+                            c.currencyCode
+                          );
+                        }}
+                        className={`h-11 w-full
+    inline-flex items-center justify-center
+    whitespace-nowrap overflow-hidden
+    rounded-xl border px-3
+    text-sm font-semibold transition
+    ${
+      active
+        ? "bg-orange-500 border-orange-500 text-white shadow-sm"
+        : "bg-white border-gray-300 text-gray-800 hover:bg-orange-50"
+    }
+            ${
+              posDisabled
+                ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                : ""
+            }
+          `}
+                      >
+                        {c.currencyCode}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-col items-center justify-between gap-2 w-full">
               <button
                 disabled={order.items.length === 0 && posDisabled}
                 onClick={sendToKitchen}
-                className={`group inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50${
+                className={`w-full group flex items-center justify-center items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50${
                   posDisabled
                     ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
                     : "hover:bg-emerald-700"
@@ -1506,19 +1566,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
               <button
                 disabled={posDisabled}
-                className={`rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-                onClick={startNewOrder}
-              >
-                {t.POS.newOrder}
-              </button>
-
-              <button
-                disabled={posDisabled}
-                className={`group inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
+                className={`w-full flex items-center justify-center group gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:brightness-105${
                   posDisabled
                     ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
                     : "hover:bg-emerald-700"
@@ -1546,22 +1594,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 }}
               >
                 {t.POS.payClose}
-              </button>
-
-              <button
-                disabled={posDisabled}
-                onClick={() => {
-                  setMergeMode(true);
-                  setFirstMergeTable(null);
-                  alert("Select the first table to merge");
-                }}
-                className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-              >
-                {t.POS.merge}
               </button>
             </div>
           </div>
