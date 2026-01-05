@@ -168,6 +168,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [mergeMode, setMergeMode] = useState(false);
   const [firstMergeTable, setFirstMergeTable] = useState<number | null>(null);
 
+  const [paymentPopupOpen, setPaymentPopupOpen] = useState(false);
+  const [paidAmount, setPaidAmount] = useState<number>(0);
+  const [paidCurrencyId, setPaidCurrencyId] = useState<number | null>(null);
+  const [remainingCurrencyId, setRemainingCurrencyId] = useState<number | null>(
+    null
+  );
+  const [returnCurrencyId, setReturnCurrencyId] = useState<number | null>(null);
+
   const [allowedCurrencies, setAllowedCurrencies] = useState<AllowedCurrency[]>(
     []
   );
@@ -1062,6 +1070,39 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     });
   };
 
+  // total is in CURRENT selected display currency
+  const currentDisplayRate = currencyRate ?? 1;
+
+  // base/original currency total (store/company currency)
+  const baseTotalOriginal = total / currentDisplayRate;
+
+  // Paid currency
+  const paidCurrency = allowedCurrencies.find((c) => c.id === paidCurrencyId);
+  const paidRate = paidCurrency?.rate ?? 1;
+
+  // Paid -> original
+  const paidInOriginal = paidAmount / paidRate;
+
+  // Remaining/Return in original
+  const remainingOriginal = Math.max(0, baseTotalOriginal - paidInOriginal);
+  const returnOriginal = Math.max(0, paidInOriginal - baseTotalOriginal);
+
+  // Remaining currency
+  const remainingCurrency = allowedCurrencies.find(
+    (c) => c.id === remainingCurrencyId
+  );
+  const remainingRate = remainingCurrency?.rate ?? 1;
+  const remainingToPay = remainingOriginal * remainingRate;
+
+  // Return currency
+  const returnCurrency = allowedCurrencies.find(
+    (c) => c.id === returnCurrencyId
+  );
+  const returnRate = returnCurrency?.rate ?? 1;
+  const remainingToReturn = returnOriginal * returnRate;
+
+  const displayTotal = total; // already converted (EUR 187.01)
+
   /* -------------------- render -------------------- */
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
@@ -1293,6 +1334,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     : "hover:bg-emerald-700"
                 }`}
                 disabled={posDisabled}
+                onClick={() => {
+                  setPaidAmount(0);
+                  setPaidCurrencyId(selectedCurrencyId);
+                  setRemainingCurrencyId(selectedCurrencyId);
+                  setReturnCurrencyId(selectedCurrencyId);
+
+                  setPaymentPopupOpen(true);
+                }}
               >
                 <Receipt className="h-4 w-4" />
               </button>
@@ -2378,6 +2427,117 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 Save Order
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {paymentPopupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            {/* HEADER */}
+            <div className="mb-6 text-center">
+              <p className="text-xs text-gray-500">Need to pay amount</p>
+              <p className="text-2xl font-bold">
+                {CurrencySymbol} {money(displayTotal)}
+              </p>
+            </div>
+
+            {/* PAID */}
+            <div className="mb-4">
+              <label className="mb-1 block text-xs font-semibold text-gray-600">
+                Paid
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(Number(e.target.value))}
+                  className="h-11 w-full rounded-xl border px-3 text-sm"
+                />
+                <select
+                  value={paidCurrencyId ?? ""}
+                  onChange={(e) => setPaidCurrencyId(Number(e.target.value))}
+                  className="h-11 rounded-xl border px-3 text-sm"
+                >
+                  {allowedCurrencies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.currencyCode}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* REMAINING TO PAY */}
+            <div className="mb-4">
+              <label className="mb-1 block text-xs font-semibold text-gray-600">
+                Remaining to pay
+              </label>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={money(remainingToPay)}
+                  className="h-11 w-full rounded-xl border bg-gray-50 px-3 text-sm"
+                />
+                <select
+                  value={remainingCurrencyId ?? ""}
+                  onChange={(e) =>
+                    setRemainingCurrencyId(Number(e.target.value))
+                  }
+                  className="h-11 rounded-xl border px-3 text-sm"
+                >
+                  {allowedCurrencies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.currencyCode}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* REMAINING TO RETURN */}
+            <div className="mb-6">
+              <label className="mb-1 block text-xs font-semibold text-gray-600">
+                Remaining to return
+              </label>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={money(remainingToReturn)}
+                  className="h-11 w-full rounded-xl border bg-gray-50 px-3 text-sm"
+                />
+                <select
+                  value={returnCurrencyId ?? ""}
+                  onChange={(e) => setReturnCurrencyId(Number(e.target.value))}
+                  className="h-11 rounded-xl border px-3 text-sm"
+                >
+                  {allowedCurrencies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.currencyCode}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* ACTIONS */}
+            <button
+              disabled={paidInOriginal < baseTotalOriginal}
+              onClick={async () => {
+                await saveOrderToDatabase();
+                setPaymentPopupOpen(false);
+              }}
+              className="mb-3 h-12 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Pay & Close
+            </button>
+
+            <button
+              onClick={() => setPaymentPopupOpen(false)}
+              className="h-11 w-full rounded-xl border text-sm"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}
