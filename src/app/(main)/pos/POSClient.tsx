@@ -22,6 +22,12 @@ import LanguageSwitch from "@/components/shared/language-switch";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
 import { PlusSquare } from "lucide-react";
+import EditOrderPopup from "./editOrderPopup";
+import { OrderItemUI } from "./editOrderPopup";
+import type {
+  ModifierGroup as PopupModifierGroup,
+  ModifierOption as PopupModifierOption,
+} from "./editOrderPopup";
 
 /* =============================================================================
  * Types
@@ -184,6 +190,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [selectedCurrencyId, setSelectedCurrencyId] = useState<number | null>(
     null
   );
+
+  const [editOrderCode, setEditOrderCode] = useState("");
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [originalOrderItems, setOriginalOrderItems] = useState<OrderItem[]>([]);
+
+  const [originalItems, setOriginalItems] = useState<OrderItemUI[]>([]);
+
+  const [editPopupOpen, setEditPopupOpen] = useState(false);
+  const [editingItems, setEditingItems] = useState<OrderItemUI[]>([]);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const convertPrice = (price: number) => {
     return price * currencyRate;
@@ -487,6 +503,85 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const API_URL = process.env.NEXT_PUBLIC_API_LINK;
   const [g_hash, setGHash] = useState<string | null>(null);
   const [user_id, setUserId] = useState<string | null>(null);
+
+  const openEditPopup = () => {
+    const mapped: OrderItemUI[] = order.items.map((li: any) => ({
+      itemId: li.itemId,
+      itemName: li.name,
+      stationId: li.stationId,
+      qty: li.qty,
+      unit_price: li.basePrice + li.priceExtra,
+      notes: li.note ?? "",
+      modifiers: li.modifiers.map((m: any) => ({
+        modifier_id: m.optionId,
+        name:
+          menu
+            .find((it) => it.id === li.itemId)
+            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
+            ?.options.find((o: any) => o.id === m.optionId)?.name || "",
+        price:
+          menu
+            .find((it) => it.id === li.itemId)
+            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
+            ?.options.find((o: any) => o.id === m.optionId)?.priceDelta || 0,
+        quantity: 1,
+      })),
+    }));
+
+    setEditingItems(mapped);
+    setEditPopupOpen(true);
+  };
+
+  const saveEditedOrder = async (
+    orderId: number,
+    originalItems: OrderItemUI[]
+  ) => {
+    setSavingEdit(true);
+
+    try {
+      await api.post(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/editorder`,
+        {
+          g_hash,
+          user_id,
+          store_id: localStorage.getItem("store_id"),
+          warehouse_id: localStorage.getItem("warehouse_id"),
+
+          order_id: orderId,
+
+          original_items: JSON.stringify(
+            originalItems.map((it) => ({
+              item_id: it.itemId,
+              station_id: it.stationId,
+              quantity: it.qty,
+              unit_price: it.unit_price,
+              notes: it.notes ?? "",
+              modifiers: it.modifiers,
+            }))
+          ),
+
+          updated_items: JSON.stringify(
+            editingItems.map((it) => ({
+              item_id: it.itemId,
+              station_id: it.stationId,
+              quantity: it.qty,
+              unit_price: it.unit_price,
+              notes: it.notes ?? "",
+              modifiers: it.modifiers,
+            }))
+          ),
+        }
+      );
+
+      alert("Order updated successfully");
+
+      setEditPopupOpen(false);
+    } catch (e: any) {
+      alert(e?.response?.data?.error_message || "Failed to update order");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const [hasOpenCash, setHasOpenCash] = useState<boolean | undefined>(
     undefined
@@ -985,6 +1080,22 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
+    if (editingOrderId) {
+      await api.post("/api/orders/updateorder", {
+        order_id: editingOrderId,
+        order_items: JSON.stringify(formattedItems),
+        table_ids: orderData.tableIds.join(","),
+        sub_total: subTotalDisplay,
+        total: totalDisplay,
+        g_hash,
+        user_id,
+      });
+
+      setEditingOrderId(null);
+    } else {
+      await api.post("/api/orders/createorder", payload);
+    }
+
     const response = await api.post(
       process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
       payload
@@ -1102,6 +1213,28 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const remainingToReturn = returnOriginal * returnRate;
 
   const displayTotal = total; // already converted (EUR 187.01)
+
+  const modifierGroupsByItemId = useMemo<
+    Record<number, PopupModifierGroup[]>
+  >(() => {
+    const map: Record<number, PopupModifierGroup[]> = {};
+
+    menu.forEach((item: any) => {
+      if (!item.modifierGroups?.length) return;
+
+      map[item.id] = item.modifierGroups.map((g: any) => ({
+        id: Number(g.id),
+        name: g.name,
+        options: g.options.map((o: any) => ({
+          id: Number(o.id),
+          name: o.name,
+          price: Number(o.priceDelta ?? 0), // ✅ FIX HERE
+        })),
+      }));
+    });
+
+    return map;
+  }, [menu]);
 
   /* -------------------- render -------------------- */
   return (
@@ -1344,6 +1477,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 }}
               >
                 <Receipt className="h-4 w-4" />
+              </button>
+
+              <button
+                onClick={() => setEditPopupOpen(true)}
+                className="rounded-xl border px-3 py-2 text-xs font-semibold"
+              >
+                <Edit3 className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -1924,6 +2064,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             </div>
           </div>
         </div>
+      )}
+
+      {editPopupOpen && (
+        <EditOrderPopup
+          open={editPopupOpen}
+          onClose={() => setEditPopupOpen(false)}
+          items={editingItems}
+          onChangeItems={setEditingItems}
+          availableModifierGroupsByItemId={modifierGroupsByItemId}
+          onSave={saveEditedOrder}
+          saving={savingEdit}
+        />
       )}
 
       {customerDrawerOpen && (
