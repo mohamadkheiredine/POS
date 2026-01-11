@@ -727,9 +727,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return;
     }
 
+    const store_id = localStorage.getItem("store_id");
+    const company_id = localStorage.getItem("company_id");
+
     const res = await api.post(API_URL + "/api/orders/createemptyorder", {
-      g_hash,
-      user_id,
+      g_hash : g_hash,
+      user_id : user_id,
+      store_id : store_id,
+      company_id : company_id
     });
 
     if (res.data.is_error) return alert(res.data.error_msg);
