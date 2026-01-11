@@ -15,15 +15,15 @@ import {
   Square,
   SquareCheck,
 } from "lucide-react";
-import "../../../components/theme/pages/pos.scss";
+import "@/components/theme/pages/pos.scss";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
 import LanguageSwitch from "@/components/shared/language-switch";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
 import { PlusSquare } from "lucide-react";
-import EditOrderPopup from "./editOrderPopup";
-import { OrderItemUI } from "./editOrderPopup";
+import EditOrderPopup from "@/components/include/editOrderPopup";
+import { OrderItemUI } from "@/components/include/editOrderPopup";
 import type {
   ModifierGroup as PopupModifierGroup,
   ModifierOption as PopupModifierOption,

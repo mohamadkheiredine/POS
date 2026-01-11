@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import OrderClient from "./OrderClient";
+import OrderClient from "@/components/include/OrderClient";
 
 export default async function PosPage() {
   const cookieStore = await cookies();

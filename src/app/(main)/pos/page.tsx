@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import POSClient from "./POSClient";
+import POSClient from "@/components/include/POSClient";
 
 export default async function PosPage() {
   const cookieStore = await cookies();
