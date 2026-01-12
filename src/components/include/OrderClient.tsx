@@ -8,6 +8,7 @@ import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
+import { Printer } from "lucide-react";
 
 // ───────────────────────────────
 // Types
@@ -19,6 +20,7 @@ type Order = {
   code: string;
   warehouse: number;
   total: number;
+  currencyCode: string; 
   createdAt: string;
 };
 
@@ -31,8 +33,9 @@ type DateFilter =
   | "daterange";
 
 // Utils
-const money = (n: number) =>
-  `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+const money = (n: number, code: string) =>
+  `${code} ${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+
 
 // ───────────────────────────────
 // Page
@@ -138,6 +141,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
               id: o.fo_id,
               code: o.fo_order_code,
               total: o.fo_total_amount,
+              currencyCode: o.currency_code,
               warehouse: o.warehouse_id,
               createdAt: o.fo_order_datetime,
             }))
@@ -171,7 +175,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
     const ws = utils.json_to_sheet(
       filtered.map((o) => ({
         Code: o.code,
-        Total: money(o.total),
+        Total: money(o.total, o.currencyCode),
         Warehouse: o.warehouse,
         Created: new Date(o.createdAt).toLocaleString(),
       }))
@@ -201,7 +205,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
     const tableRows = filtered.map((o) => [
       o.code,
       o.warehouse ?? "",
-      money(o.total),
+      money(o.total, o.currencyCode),
       new Date(o.createdAt).toLocaleString(),
     ]);
 
@@ -224,6 +228,37 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
     });
 
     doc.save("orders.pdf");
+  };
+
+  const printOrder = async (order: Order) => {
+    try {
+      const res = await api.get(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/reprintreceipt`,
+        {
+          params: {
+            user_id: localStorage.getItem("user_id"),
+            g_hash: localStorage.getItem("g_hash"),
+            order_code: order.code,
+          },
+        }
+      );
+
+      if (res.data?.is_error === 0) {
+        const receiptHtml = res.data.receipt_html;
+
+        const w = window.open("", "_blank");
+        if (w) {
+          w.document.write(receiptHtml);
+          w.document.close();
+          w.focus();
+          w.print();
+        }
+      } else {
+        alert("Failed to load order receipt");
+      }
+    } catch (e) {
+      alert("Print failed");
+    }
   };
 
   return (
@@ -255,56 +290,55 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
         {/* Filters */}
         {/* Filters */}
-<div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-white p-3 shadow-sm">
-  {/* Search */}
-  <div className="relative w-56">
-    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-    <input
-      type="text"
-      value={search}
-      onChange={(e) => setSearch(e.target.value)}
-      placeholder="search..."
-      className="w-full rounded-2xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-    />
-  </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-white p-3 shadow-sm">
+          {/* Search */}
+          <div className="relative w-56">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="search..."
+              className="w-full rounded-2xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+          </div>
 
-  {/* Date filter dropdown */}
-  <select
-    value={dateFilter}
-    onChange={(e) => {
-      setDateFilter(e.target.value as DateFilter);
-      if (e.target.value !== "daterange") {
-        setDateFrom(undefined);
-        setDateTo(undefined);
-      }
-    }}
-    className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-  >
-    <option value="currentdate">Current Shift (Open → Close)</option>
-    <option value="today">Today</option>
-    <option value="yesterday">Yesterday</option>
-    <option value="lastweek">Last Week</option>
-    <option value="lastmonth">Last Month</option>
-    <option value="daterange">Date Range</option>
-  </select>
+          {/* Date filter dropdown */}
+          <select
+            value={dateFilter}
+            onChange={(e) => {
+              setDateFilter(e.target.value as DateFilter);
+              if (e.target.value !== "daterange") {
+                setDateFrom(undefined);
+                setDateTo(undefined);
+              }
+            }}
+            className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+          >
+            <option value="currentdate">Current Shift (Open → Close)</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="lastweek">Last Week</option>
+            <option value="lastmonth">Last Month</option>
+            <option value="daterange">Date Range</option>
+          </select>
 
-  {/* Date range pickers */}
-  {dateFilter === "daterange" && (
-    <div className="flex items-center gap-2">
-      <DatePopup
-        label="From"
-        selected={dateFrom}
-        onSelect={(d) => setDateFrom(d)}
-      />
-      <DatePopup
-        label="To"
-        selected={dateTo}
-        onSelect={(d) => setDateTo(d)}
-      />
-    </div>
-  )}
-</div>
-
+          {/* Date range pickers */}
+          {dateFilter === "daterange" && (
+            <div className="flex items-center gap-2">
+              <DatePopup
+                label="From"
+                selected={dateFrom}
+                onSelect={(d) => setDateFrom(d)}
+              />
+              <DatePopup
+                label="To"
+                selected={dateTo}
+                onSelect={(d) => setDateTo(d)}
+              />
+            </div>
+          )}
+        </div>
 
         {/* Table */}
         <div className="rounded-3xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
@@ -334,9 +368,19 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
                     <td className="font-semibold text-gray-900">{o.code}</td>
                     <td>{o.warehouse ?? 0}</td>
                     <td className="text-left font-semibold">
-                      {money(o.total)}
+                      {money(o.total, o.currencyCode)}
                     </td>
                     <td>{new Date(o.createdAt).toLocaleString()}</td>
+
+                    <td className="text-right">
+                      <button
+                        onClick={() => printOrder(o)}
+                        className="inline-flex items-center justify-center rounded-lg p-2 text-gray-600 hover:bg-gray-100 hover:text-amber-600"
+                        title="Print receipt"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
 

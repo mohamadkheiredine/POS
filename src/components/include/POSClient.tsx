@@ -1076,8 +1076,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       customer_type: customerType,
 
-      sub_total: subTotalDisplay,
-      total: totalDisplay,
+      sub_total: subTotalBase,
+      total: totalBase,
 
       sub_total_display: subTotalDisplay,
       total_display: totalDisplay,
@@ -1085,30 +1085,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
+    let response;
+
     if (editingOrderId) {
-      await api.post("/api/orders/updateorder", {
-        order_id: editingOrderId,
-        order_items: JSON.stringify(formattedItems),
-        table_ids: orderData.tableIds.join(","),
-        sub_total: subTotalDisplay,
-        total: totalDisplay,
-        g_hash,
-        user_id,
-      });
+      response = await api.post(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/updateorder`,
+        {
+          order_id: editingOrderId,
+          order_items: JSON.stringify(formattedItems),
+          table_ids: orderData.tableIds.join(","),
+          sub_total: subTotalDisplay,
+          total: totalDisplay,
+          g_hash,
+          user_id,
+        }
+      );
 
       setEditingOrderId(null);
     } else {
-      await api.post("/api/orders/createorder", payload);
+      response = await api.post(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/createorder`,
+        payload
+      );
     }
 
-    const response = await api.post(
-      process.env.NEXT_PUBLIC_API_LINK + "/api/orders/createorder",
-      payload
-    );
+    if (response.data?.is_error === 1) {
+      alert(response.data.error_msg || "Create order failed");
+      return;
+    }
 
-    if (response.data.is_error === 1) return alert(response.data.error_msg);
-
-    if (response.data.receipt_html) {
+    if (response.data?.receipt_html) {
       setReceiptHTML(response.data.receipt_html);
     }
 
