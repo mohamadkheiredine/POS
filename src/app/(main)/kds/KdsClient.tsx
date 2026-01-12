@@ -10,7 +10,6 @@ import {
   Search,
   Filter,
 } from "lucide-react";
-import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
@@ -41,21 +40,16 @@ type KdsTicket = {
 };
 
 type StatusColumn = {
-  id: number; // ss_id
-  title: string; // ss_status_title
-  tickets: KdsTicket[]; // tickets that have items in this status
+  id: number;
+  title: string; 
+  tickets: KdsTicket[]; 
 };
 
-/* ─────────────────────────────────────────
- * Helpers
- * ───────────────────────────────────────── */
+type StatusInfo = { id: number; title: string };
+
 
 const elapsedMin = (ms: number) =>
   Math.max(0, Math.floor((Date.now() - ms) / 60000));
-
-/* ─────────────────────────────────────────
- * Page
- * ───────────────────────────────────────── */
 
 export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [tickets, setTickets] = useState<KdsTicket[]>([]);
@@ -63,28 +57,27 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [soundOn, setSoundOn] = useState(true);
   const bellRef = useRef<HTMLAudioElement | null>(null);
 
-  const [station, setStation] = useState<number>(0); // 0 = all kitchens
+  const [station, setStation] = useState<number>(0);
   const [stations, setStations] = useState<any[]>([]);
   const [gHash, setGHash] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
+
+  const [statuses, setStatuses] = useState<StatusInfo[]>([]);
 
   const { t } = useI18n(lang);
 
   useEffect(() => {
     const storedHash = localStorage.getItem("g_hash") || "";
     const storedUser = localStorage.getItem("user_id") || "";
-
     setGHash(storedHash);
     setUserId(storedUser);
   }, []);
 
-  // For drag & drop: which item is being dragged
   const [dragItem, setDragItem] = useState<{
     ticketId: number;
     itemId: string;
   } | null>(null);
 
-  // ───────── Load kitchen stations ─────────
   useEffect(() => {
     async function loadStations() {
       try {
@@ -96,7 +89,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
 
         if (!res.data.is_error) {
           setStations(res.data.lst_kitchens || []);
-          // 0 = All Kitchens
           setStation(0);
         } else {
           console.warn("Error loading stations:", res.data.error_msg);
@@ -110,14 +102,40 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
+    async function loadStatuses() {
+      try {
+        const g_hash = localStorage.getItem("g_hash");
+        const user_id = localStorage.getItem("user_id");
 
-    if (!token) {
-      forceLogout("You are not logged in. Please login.");
+        const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/inventory/getlistkitchenstatuses`;
+        const res = await api.get(url, { params: { g_hash, user_id } });
+
+        if (!res.data.is_error) {
+          const list = res.data.lst_kitchen_statuses || [];
+          setStatuses(
+            list.map((s: any) => ({
+              id: Number(s.ss_id),
+              title: String(s.ss_status_title),
+            }))
+          );
+        } else {
+          console.warn("Error loading statuses:", res.data.error_msg);
+          setStatuses([]); // still allow page to render
+        }
+      } catch (err) {
+        console.error("Failed to load statuses", err);
+        setStatuses([]);
+      }
     }
+
+    loadStatuses();
   }, []);
 
-  // ───────── Load pending orders ─────────
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) forceLogout("You are not logged in. Please login.");
+  }, []);
+
   useEffect(() => {
     async function loadPendingOrders() {
       try {
@@ -132,10 +150,9 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
         const orders = res.data.lst_pending_orders || [];
 
         const mappedTickets: KdsTicket[] = orders.map((o: any) => ({
-          id: o.fo_id,
-          orderCode: o.fo_order_code,
-          orderDate: o.fo_created_at,
-
+          id: Number(o.fo_id),
+          orderCode: String(o.fo_order_code || ""),
+          orderDate: String(o.fo_creation_date || o.fo_created_at || ""),
           table: o.fo_table_id ? `T${o.fo_table_id}` : undefined,
           channel:
             o.fo_order_type === "dine_in"
@@ -143,15 +160,17 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
               : o.fo_order_type === "takeaway"
               ? "Takeaway"
               : "Delivery",
-          createdAt: Date.now(),
+          createdAt: o.fo_creation_date
+            ? new Date(o.fo_creation_date).getTime()
+            : Date.now(),
           items: (o.items || []).map((i: any) => ({
             id: String(i.oi_id),
-            name: i.mi_item_name,
-            qty: Number(i.oi_quantity),
-            notes: i.oi_notes,
-            station: Number(i.oi_station_id),
-            statusId: Number(i.oi_kitchen_status),
-            statusTitle: i.ss_status_title || "Pending",
+            name: String(i.mi_item_name || ""),
+            qty: Number(i.oi_quantity || 0),
+            notes: i.oi_notes || "",
+            station: Number(i.oi_station_id || 0),
+            statusId: Number(i.oi_kitchen_status || 0),
+            statusTitle: String(i.ss_status_title || "Pending"),
           })),
         }));
 
@@ -164,60 +183,37 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
     loadPendingOrders();
   }, []);
 
-  // ───────── Build list of statuses present for selected kitchen ─────────
-  const statusList = useMemo(() => {
-    const map = new Map<number, string>();
+  const columns = useMemo<StatusColumn[]>(() => {
+    if (!statuses.length) {
+      return [
+        { id: -1, title: "Statuses…", tickets: [] },
+        { id: -2, title: "Statuses…", tickets: [] },
+        { id: -3, title: "Statuses…", tickets: [] },
+      ];
+    }
 
-    tickets.forEach((t) => {
-      t.items.forEach((i) => {
-        if (station !== 0 && i.station !== station) return;
-        if (!map.has(i.statusId)) {
-          map.set(i.statusId, i.statusTitle || `Status ${i.statusId}`);
-        }
+    return statuses.map((st) => {
+      const ticketsInStatus: KdsTicket[] = [];
+
+      tickets.forEach((ticket) => {
+        const hasItemInThisStatus = ticket.items.some(
+          (item) =>
+            item.statusId === st.id &&
+            (station === 0 || item.station === station)
+        );
+
+        if (hasItemInThisStatus) ticketsInStatus.push(ticket);
       });
+
+      return { id: st.id, title: st.title, tickets: ticketsInStatus };
     });
-
-    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
-  }, [tickets, station]);
-
-  const columns = useMemo(() => {
-    const map = new Map<number, { title: string; tickets: KdsTicket[] }>();
-
-    tickets.forEach((ticket) => {
-      ticket.items.forEach((item) => {
-        // Filter by selected kitchen
-        if (station !== 0 && item.station !== station) return;
-
-        if (!map.has(item.statusId)) {
-          map.set(item.statusId, {
-            title: item.statusTitle || `Status ${item.statusId}`,
-            tickets: [],
-          });
-        }
-
-        const col = map.get(item.statusId)!;
-
-        if (!col.tickets.includes(ticket)) {
-          col.tickets.push(ticket);
-        }
-      });
-    });
-
-    return Array.from(map.entries()).map(([id, col]) => ({
-      id,
-      title: col.title,
-      tickets: col.tickets,
-    }));
-  }, [tickets, station]);
-
-  /* ───────── actions ───────── */
+  }, [statuses, tickets, station]);
 
   const toggleHold = (ticketId: number) =>
     setTickets((prev) =>
       prev.map((t) => (t.id === ticketId ? { ...t, hold: !t.hold } : t))
     );
 
-  // Move item to another status (local + API)
   const moveItemToStatus = async (
     ticketId: number,
     itemId: string,
@@ -240,10 +236,8 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
 
     try {
       const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/updatekitchenstatus`;
-      if (!gHash || !userId) {
-        console.error("Missing g_hash or user_id");
-        return;
-      }
+      if (!gHash || !userId) return;
+
       await api.post(url, {
         g_hash: gHash,
         user_id: userId,
@@ -279,6 +273,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                 : stations.find((s) => Number(s.ks_id) === station)?.ks_name}
             </span>
           </div>
+
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -289,6 +284,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                 className="w-56 rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
               />
             </div>
+
             <div className="relative">
               <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <select
@@ -304,6 +300,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                 ))}
               </select>
             </div>
+
             <button
               onClick={() => setSoundOn((s) => !s)}
               className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm ${
@@ -319,7 +316,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           </div>
         </div>
 
-        {/* Columns per status */}
         <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
           {columns.map((col) => (
             <div
@@ -329,6 +325,9 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
               onDrop={(e) => {
                 e.preventDefault();
                 if (!dragItem) return;
+
+                if (col.id < 0) return;
+
                 moveItemToStatus(
                   dragItem.ticketId,
                   dragItem.itemId,
@@ -340,15 +339,24 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
             >
               <LaneHeader
                 title={col.title}
-                count={col.tickets.length}
+                count={col.tickets.reduce((sum, ticket) => {
+                  const itemsInCol = ticket.items.filter(
+                    (i) =>
+                      i.statusId === col.id &&
+                      (station === 0 || i.station === station)
+                  );
+                  return sum + itemsInCol.length;
+                }, 0)}
                 color="bg-amber-100 text-amber-800"
               />
 
               <div className="mt-2 space-y-3">
                 {col.tickets.map((t) => (
                   <TicketCard
-                    key={`${t.id}-${col.title}`}
+                    key={`${t.id}-${col.id}`}
                     t={t}
+                    statusId={col.id}
+                    stationFilter={station}
                     onHold={() => toggleHold(t.id)}
                     onItemDragStart={(itemId) =>
                       setDragItem({ ticketId: t.id, itemId })
@@ -401,13 +409,25 @@ function EmptyHint({ text }: { text: string }) {
 
 function TicketCard({
   t,
+  statusId,
+  stationFilter,
   onHold,
   onItemDragStart,
 }: {
   t: KdsTicket;
+  statusId: number;
+  stationFilter: number;
   onHold: () => void;
   onItemDragStart: (itemId: string) => void;
 }) {
+  const itemsInThisColumn = t.items.filter(
+    (i) =>
+      i.statusId === statusId &&
+      (stationFilter === 0 || i.station === stationFilter)
+  );
+
+  if (itemsInThisColumn.length === 0) return null;
+
   const mins = elapsedMin(t.createdAt);
 
   const toneCls =
@@ -417,7 +437,7 @@ function TicketCard({
       ? "bg-amber-100 text-amber-800 ring-amber-200"
       : "bg-emerald-100 text-emerald-800 ring-emerald-200";
 
-  const totalItems = t.items.reduce((s, i) => s + i.qty, 0);
+  const totalQtyInColumn = itemsInThisColumn.reduce((s, i) => s + i.qty, 0);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white ring-1 ring-white/60">
@@ -433,7 +453,7 @@ function TicketCard({
               {t.orderCode}
             </span>
             <span className="text-[10px] text-gray-500">
-              {new Date(t.orderDate).toLocaleString()}
+              {t.orderDate ? new Date(t.orderDate).toLocaleString() : ""}
             </span>
           </div>
 
@@ -449,7 +469,7 @@ function TicketCard({
 
       {/* body items */}
       <div className="divide-y divide-gray-100">
-        {t.items.map((it) => (
+        {itemsInThisColumn.map((it) => (
           <div
             key={it.id}
             className="flex items-start justify-between px-3 py-2"
@@ -473,7 +493,7 @@ function TicketCard({
       {/* footer */}
       <div className="flex items-center justify-between border-t px-3 py-2">
         <div className="text-[11px] text-gray-600">
-          {t.items.length} items · {totalItems} total
+          {itemsInThisColumn.length} items · {totalQtyInColumn} total
         </div>
         <div className="flex items-center gap-1">
           <button
