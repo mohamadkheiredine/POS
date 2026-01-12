@@ -2615,12 +2615,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                   type="number"
                   value={paidAmount}
                   onChange={(e) => setPaidAmount(Number(e.target.value))}
-                  className="h-11 w-full rounded-xl border px-3 text-sm"
+                  className="h-11 w-[50%] rounded-xl border px-3 text-sm"
                 />
                 <select
                   value={paidCurrencyId ?? ""}
                   onChange={(e) => setPaidCurrencyId(Number(e.target.value))}
-                  className="h-11 rounded-xl border px-3 text-sm"
+                  className="h-11 rounded-xl border px-3 text-sm w-[50%]"
                 >
                   {allowedCurrencies.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -2640,14 +2640,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <input
                   readOnly
                   value={money(remainingToPay)}
-                  className="h-11 w-full rounded-xl border bg-gray-50 px-3 text-sm"
+                  className="h-11 w-[50%] rounded-xl border bg-gray-50 px-3 text-sm"
                 />
                 <select
                   value={remainingCurrencyId ?? ""}
                   onChange={(e) =>
                     setRemainingCurrencyId(Number(e.target.value))
                   }
-                  className="h-11 rounded-xl border px-3 text-sm"
+                  className="h-11 rounded-xl border px-3 text-sm w-[50%]"
                 >
                   {allowedCurrencies.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -2667,12 +2667,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 <input
                   readOnly
                   value={money(remainingToReturn)}
-                  className="h-11 w-full rounded-xl border bg-gray-50 px-3 text-sm"
+                  className="h-11 w-[50%] rounded-xl border bg-gray-50 px-3 text-sm"
                 />
                 <select
                   value={returnCurrencyId ?? ""}
                   onChange={(e) => setReturnCurrencyId(Number(e.target.value))}
-                  className="h-11 rounded-xl border px-3 text-sm"
+                  className="h-11 rounded-xl border px-3 text-sm w-[50%]"
                 >
                   {allowedCurrencies.map((c) => (
                     <option key={c.id} value={c.id}>
