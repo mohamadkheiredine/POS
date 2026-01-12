@@ -18,9 +18,51 @@ type CurrencyData = {
   currency_name?: string;
 };
 
+type CurrencyOption = {
+  value: string;
+  label: string;
+  currency_code: string;
+};
+
 /* ---------- component ---------- */
 export default function OpenShift() {
   const [currencies, setCurrencies] = useState<CurrencyData[]>([]);
+  const [shiftOpen, setShiftOpen] = useState(false);
+
+  const loadOpenShift = async (): Promise<boolean> => {
+    const user_id = localStorage.getItem("user_id");
+    const g_hash = localStorage.getItem("g_hash");
+
+    try {
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_LINK}/api/shift/getopencurrencies`,
+        { params: { user_id, g_hash } }
+      );
+
+      if (res.data?.is_error === 1) {
+        return false;
+      }
+
+      const data = res.data.data || [];
+      if (!data.length) return false;
+
+      setShiftOpen(true);
+
+      setRows(
+        data.map((r: any) => ({
+          id: String(r.currency_id), // numeric identity, stable
+          currencyId: String(r.currency_id),
+          currencyCode: r.currency_code,
+          amount: String(r.open_value),
+        }))
+      );
+
+      return true;
+    } catch (e) {
+      console.error("Failed to load open shift", e);
+      return false;
+    }
+  };
 
   const router = useRouter();
 
@@ -54,14 +96,18 @@ export default function OpenShift() {
       }
       setCurrencies(uniqueCurrencies);
 
-      setRows([
-        {
-          id: crypto.randomUUID(),
-          currencyId: "",
-          currencyCode: "",
-          amount: "",
-        },
-      ]);
+      const hasOpenShift = await loadOpenShift();
+
+      if (!hasOpenShift) {
+        setRows([
+          {
+            id: "new",
+            currencyId: "",
+            currencyCode: "",
+            amount: "",
+          },
+        ]);
+      }
     } catch (err) {
       console.error("GetListCurrencies failed", err);
       setCurrencies([]);
@@ -163,6 +209,9 @@ export default function OpenShift() {
       })),
     };
 
+    if (submitting) {
+      return;
+    }
     setSubmitting(true);
     try {
       const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/shift/openshift`;
@@ -220,6 +269,7 @@ export default function OpenShift() {
             <div className="font-semibold">Opening Balances</div>
             <button
               onClick={addRow}
+              disabled={shiftOpen}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 hover:bg-slate-50"
             >
               + Add Currency
@@ -237,7 +287,7 @@ export default function OpenShift() {
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const currencyOptions = currencies
+                  const currencyOptions: CurrencyOption[] = currencies
                     .filter((curr) => {
                       const usedCodes = new Set(
                         rows
@@ -256,14 +306,28 @@ export default function OpenShift() {
                       currency_code: curr.currency_code,
                     }));
 
+                  const selectedOption =
+                    r.currencyId && currencyMap[r.currencyId]
+                      ? {
+                          value: r.currencyId,
+                          label: `${
+                            currencyMap[r.currencyId].currency_code
+                          } - ${currencyMap[r.currencyId].currency_name}`,
+                          currency_code:
+                            currencyMap[r.currencyId].currency_code,
+                        }
+                      : null;
+
                   return (
                     <tr key={r.id} className="border-t border-black/5">
                       <td className="px-3 py-2 w-[40%]">
-                        <Select
+                        <Select<CurrencyOption, false>
                           options={currencyOptions}
+                          value={selectedOption}
                           placeholder="-- Select Currency --"
                           isSearchable
                           closeMenuOnSelect
+                          isDisabled={shiftOpen}
                           hideSelectedOptions={false}
                           components={{ MenuList: SearchableMenuList }}
                           menuPortalTarget={
@@ -326,6 +390,7 @@ export default function OpenShift() {
                       </td>
                       <td className="px-3 py-2">
                         <input
+                          disabled={shiftOpen}
                           inputMode="decimal"
                           className="w-[100%] rounded-xl border border-black/10 px-3 py-2 text-right"
                           placeholder="0.00"
@@ -338,6 +403,7 @@ export default function OpenShift() {
                       <td className="px-3 py-2 text-right">
                         <button
                           onClick={() => removeRow(r.id)}
+                          disabled={shiftOpen}
                           className="rounded-lg px-2 py-1 text-rose-600 hover:bg-rose-50"
                           title="Remove row"
                         >
@@ -372,10 +438,10 @@ export default function OpenShift() {
           </button>
           <button
             onClick={submitOpen}
-            disabled={submitting}
+            disabled={submitting || shiftOpen}
             className="rounded-xl bg-emerald-600 px-6 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
           >
-            {submitting ? "Opening…" : "🔓 Open Drawer"}
+            {shiftOpen ? "Drawer Already Open" : "🔓 Open Drawer"}
           </button>
         </section>
       </main>
