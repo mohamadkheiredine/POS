@@ -731,10 +731,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const company_id = localStorage.getItem("company_id");
 
     const res = await api.post(API_URL + "/api/orders/createemptyorder", {
-      g_hash : g_hash,
-      user_id : user_id,
-      store_id : store_id,
-      company_id : company_id
+      g_hash: g_hash,
+      user_id: user_id,
+      store_id: store_id,
+      company_id: company_id,
     });
 
     if (res.data.is_error) return alert(res.data.error_msg);
@@ -1398,7 +1398,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {CurrencySymbol} {money(convertPrice(item.price))}
                   </div>
 
-                  <span className="mt-1 inline-block max-w-[120px] truncate text-[11px] rounded-full bg-gray-100 px-2 py-0.5 text-gray-600">
+                  <span className="mt-1 inline-flex self-start max-w-full text-[11px] rounded-lg bg-gray-100 px-2 py-1 text-gray-600 break-words leading-tight">
                     {item.categoryName}
                   </span>
                 </button>
