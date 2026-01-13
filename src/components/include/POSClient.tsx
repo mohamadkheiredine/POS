@@ -101,6 +101,7 @@ type LocalOrder = {
   orderId: string;
   tableIds: number[];
   items: OrderItem[];
+  isHeld?: boolean;
 };
 
 type KitchenStationDB = {
@@ -117,8 +118,6 @@ type AllowedCurrency = {
   currencyCode: string;
   currencyName: string;
 };
-
-type KitchenRoute = "Grill" | "Salad" | "Bar" | "Dessert" | "Expo";
 
 /* =============================================================================
  * Helpers
@@ -145,15 +144,38 @@ function priceFromModifiers(
   return extra;
 }
 
-const KITCHEN_STATIONS: KitchenRoute[] = [
-  "Grill",
-  "Salad",
-  "Bar",
-  "Dessert",
-  "Expo",
-];
-
 const USE_MODIFIERS = process.env.NEXT_PUBLIC_USE_MODIFIER === "true";
+
+const HELD_ORDER_KEY = "pos_held_order_snapshot";
+
+type HeldSnapshot = {
+  orderId: string;
+  tableIds: number[];
+  items: OrderItem[];
+  heldAt: number;
+};
+
+function readHeldSnapshot(): HeldSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(HELD_ORDER_KEY);
+    return raw ? (JSON.parse(raw) as HeldSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHeldSnapshot(s: HeldSnapshot) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(HELD_ORDER_KEY, JSON.stringify(s));
+  localStorage.setItem("last_held_order_id", s.orderId);
+}
+
+function clearHeldSnapshot() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(HELD_ORDER_KEY);
+  localStorage.removeItem("last_held_order_id");
+}
 
 /* =============================================================================
  * Page
@@ -285,8 +307,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         }
       );
 
-      if (!res.data.is_error) {
-        setKitchenStations(res.data.stations);
+      if (res.data?.is_error === 0) {
+        setKitchenStations(res.data.lst_kitchens);
       }
     } catch (err) {
       console.error("Failed to load kitchen stations", err);
@@ -504,6 +526,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [g_hash, setGHash] = useState<string | null>(null);
   const [user_id, setUserId] = useState<string | null>(null);
 
+  const [heldSnapshot, setHeldSnapshot] = useState<HeldSnapshot | null>(null);
+  const [lastHeldOrderId, setLastHeldOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const snap = readHeldSnapshot();
+    setHeldSnapshot(snap);
+
+    const v = localStorage.getItem("last_held_order_id");
+    if (v) setLastHeldOrderId(v);
+  }, []);
+
   const openEditPopup = () => {
     const mapped: OrderItemUI[] = order.items.map((li: any) => ({
       itemId: li.itemId,
@@ -713,7 +746,41 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return;
     }
 
-    const existing = ordersInfo.find((o) => o.tableIds.includes(table.id));
+    const existing = ordersInfo.find(
+      (o) => o.tableIds.includes(table.id) && !o.isHeld
+    );
+
+    const held = ordersInfo.find(
+      (o) => o.isHeld && o.tableIds.includes(table.id)
+    );
+
+    if (held) {
+      setOrdersInfo((prev) =>
+        prev.map((o) =>
+          o.orderId === held.orderId ? { ...o, isHeld: false } : o
+        )
+      );
+
+      // if this held order is the active snapshot, clear it
+      const snap = readHeldSnapshot();
+      if (snap?.orderId === held.orderId) {
+        clearHeldSnapshot();
+        setHeldSnapshot(null);
+        setLastHeldOrderId(null);
+      }
+
+      setCurrentOrderId(held.orderId);
+      setCurrentTableId(table.id);
+
+      setOrder({
+        id: held.orderId,
+        items: held.items,
+        createdAt: Date.now(),
+        status: "open",
+      });
+
+      return;
+    }
 
     if (existing) {
       setCurrentOrderId(existing.orderId);
@@ -847,9 +914,34 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const confirmAddToOrder = () => {
     if (!modItem) return;
 
+    let orderId = currentOrderId;
+
+    if (!orderId) {
+      orderId = uid();
+
+      setCurrentOrderId(orderId);
+      setCurrentTableId(null);
+
+      const newOrder: LocalOrder = {
+        orderId,
+        tableIds: [0],
+        items: [],
+      };
+
+      setOrdersInfo((prev) => [...prev, newOrder]);
+
+      setOrder({
+        id: orderId,
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+    }
+
     const priceExtra = priceFromModifiers(modItem.modifierGroups, modSelected);
 
-    const newLine: any = {
+    const newLine: OrderItem = {
       uid: uid(),
       itemId: modItem.id,
       name: modItem.name,
@@ -862,15 +954,34 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       sentToKitchen: false,
     };
 
-    setOrder((o: any) => ({ ...o, items: [...o.items, newLine] }));
+    // ui order
+    setOrder((o: any) => ({
+      ...o,
+      id: orderId,
+      items: [...o.items, newLine],
+    }));
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === currentOrderId
-          ? { ...o, items: [...o.items, newLine] }
-          : o
-      )
-    );
+    // ordersInfo
+    setOrdersInfo((prev) => {
+      const idx = prev.findIndex((o) => o.orderId === orderId);
+
+      if (idx === -1) {
+        // order not in ordersInfo → create it
+        return [
+          ...prev,
+          {
+            orderId,
+            tableIds: [currentTableId ?? 0],
+            items: [newLine],
+            isHeld: false,
+          },
+        ];
+      }
+
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], items: [...copy[idx].items, newLine] };
+      return copy;
+    });
 
     setModItem(null);
   };
@@ -929,37 +1040,64 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   /* -------------------- edit line -------------------- */
-  const openEdit = (li: OrderItem) => setEditLine({ ...li });
+  const openEdit = (li: OrderItem) =>
+    setEditLine({
+      ...li,
+      modifiers: li.modifiers ?? [],
+    });
+
   const applyEdit = () => {
     if (!editLine) return;
-    // Recalculate extra (in case modifiers changed)
+
     const it: any = menu.find((m) => m.id === editLine.itemId);
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
+
     setOrder((o: any) => ({
       ...o,
       items: o.items.map((x: any) => (x.uid === updated.uid ? updated : x)),
     }));
+
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === currentOrderId
+          ? {
+              ...o,
+              items: o.items.map((x: any) =>
+                x.uid === updated.uid ? updated : x
+              ),
+            }
+          : o
+      )
+    );
+
     setEditLine(null);
   };
 
-  const removeLine = (uidLine: UID) =>
+  const removeLine = (uidLine: UID) => {
     setOrder((o: any) => ({
       ...o,
       items: o.items.filter((x: any) => x.uid !== uidLine),
     }));
 
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === currentOrderId
+          ? { ...o, items: o.items.filter((x: any) => x.uid !== uidLine) }
+          : o
+      )
+    );
+  };
+
   const itemsForCurrentTable = useMemo(() => {
-    return order.items; // show ALL items for merged tables
+    return order.items;
   }, [order.items]);
 
-  function saveOrdersInfo(allOrders: LocalOrder[]) {
-    localStorage.setItem("orders_info", JSON.stringify(allOrders));
-  }
 
-  useEffect(() => {
-    localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
-  }, [ordersInfo]);
+
+  // useEffect(() => {
+  //   localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+  // }, [ordersInfo]);
 
   const saveOrderToDatabase = async (finalCustomerId?: number) => {
     const tableKey = currentTableId ? Number(currentTableId) : 0;
@@ -974,11 +1112,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       return;
     }
 
-    let orderData = ordersInfo.find((o) => o.tableIds.includes(tableKey));
+    let orderData =
+      ordersInfo.find((o) => o.orderId === currentOrderId) ??
+      ordersInfo.find((o) => o.tableIds.includes(tableKey));
 
     if (!orderData) {
       orderData = {
-        orderId: uid(),
+        orderId: currentOrderId ?? uid(),
         tableIds: [tableKey],
         items: order.items,
       };
@@ -1123,7 +1263,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setOrdersInfo(remaining);
     localStorage.setItem("orders_info", JSON.stringify(remaining));
 
-    // Reset UI
+    // reset ui
     setOrder({
       id: uid(),
       guests: 0,
@@ -1175,16 +1315,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   // Recalculate active tables any time ordersInfo changes
   useEffect(() => {
     const actives = ordersInfo
-      .filter((o) => o.tableIds && o.items.length > 0)
+      .filter((o) => !o.isHeld && o.items.length > 0)
       .flatMap((o) => o.tableIds);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
 
   const startNewOrder = () => {
+    const newId = uid();
+
     setCurrentTableId(null);
+    setCurrentOrderId(newId);
+
+    setOrdersInfo((prev) => [
+      ...prev,
+      { orderId: newId, tableIds: [0], items: [] },
+    ]);
+
     setOrder({
-      id: uid(),
+      id: newId,
       guests: 0,
       items: [],
       createdAt: Date.now(),
@@ -1223,7 +1372,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const returnRate = returnCurrency?.rate ?? 1;
   const remainingToReturn = returnOriginal * returnRate;
 
-  const displayTotal = total; // already converted (EUR 187.01)
+  const displayTotal = total; // converted 
 
   const modifierGroupsByItemId = useMemo<
     Record<number, PopupModifierGroup[]>
@@ -1239,13 +1388,189 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         options: g.options.map((o: any) => ({
           id: Number(o.id),
           name: o.name,
-          price: Number(o.priceDelta ?? 0), // ✅ FIX HERE
+          price: Number(o.priceDelta ?? 0),
         })),
       }));
     });
 
     return map;
   }, [menu]);
+
+  const updateLineQty = (lineUid: string, delta: number) => {
+    setOrder((prev: any) => ({
+      ...prev,
+      items: prev.items.map((x: any) =>
+        x.uid === lineUid ? { ...x, qty: Math.max(1, x.qty + delta) } : x
+      ),
+    }));
+
+    // update ordersInfo
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === currentOrderId
+          ? {
+              ...o,
+              items: o.items.map((x: any) =>
+                x.uid === lineUid
+                  ? { ...x, qty: Math.max(1, x.qty + delta) }
+                  : x
+              ),
+            }
+          : o
+      )
+    );
+  };
+
+  const holdOrder = () => {
+    if (posDisabled) return;
+    if (!currentOrderId) return;
+    if (!order.items?.length) return;
+
+    const snap: HeldSnapshot = {
+      orderId: currentOrderId,
+      tableIds: [currentTableId ?? 0],
+      items: order.items,
+      heldAt: Date.now(),
+    };
+
+    writeHeldSnapshot(snap);
+    setHeldSnapshot(snap);
+    setLastHeldOrderId(currentOrderId);
+
+    // keep ordersInfo in sync
+    setOrdersInfo((prev) => {
+      const idx = prev.findIndex((o) => o.orderId === currentOrderId);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            orderId: currentOrderId,
+            tableIds: [currentTableId ?? 0],
+            items: order.items,
+            isHeld: true,
+          },
+        ];
+      }
+      const copy = [...prev];
+      copy[idx] = {
+        ...copy[idx],
+        tableIds: copy[idx].tableIds?.length
+          ? copy[idx].tableIds
+          : [currentTableId ?? 0],
+        items: order.items?.length ? order.items : copy[idx].items,
+        isHeld: true,
+      };
+      return copy;
+    });
+
+    // reset UI
+    setCurrentOrderId(null);
+    setCurrentTableId(null);
+    setOrder({
+      id: uid(),
+      guests: 0,
+      items: [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+  };
+
+  const activeHeldOrder = useMemo(() => {
+    if (heldSnapshot?.orderId) return heldSnapshot;
+
+    if (lastHeldOrderId) {
+      const fromList = ordersInfo.find(
+        (o) => o.isHeld && o.orderId === lastHeldOrderId
+      );
+      if (fromList) {
+        return {
+          orderId: fromList.orderId,
+          tableIds: fromList.tableIds ?? [0],
+          items: fromList.items ?? [],
+          heldAt: Date.now(),
+        } as HeldSnapshot;
+      }
+    }
+
+    const anyHeld = ordersInfo.find((o) => o.isHeld);
+    if (!anyHeld) return null;
+
+    return {
+      orderId: anyHeld.orderId,
+      tableIds: anyHeld.tableIds ?? [0],
+      items: anyHeld.items ?? [],
+      heldAt: Date.now(),
+    } as HeldSnapshot;
+  }, [heldSnapshot, lastHeldOrderId, ordersInfo]);
+
+  const canHold = useMemo(() => {
+    if (posDisabled) return false;
+    if (!currentOrderId) return false;
+    if (!order.items?.length) return false;
+
+    const info = ordersInfo.find((o) => o.orderId === currentOrderId);
+    if (info?.isHeld) return false;
+
+    if (activeHeldOrder?.orderId === currentOrderId) return false;
+
+    return true;
+  }, [posDisabled, currentOrderId, order.items, ordersInfo, activeHeldOrder]);
+
+  const canLoadHeld = useMemo(() => {
+    if (posDisabled) return false;
+    return (
+      !!activeHeldOrder?.orderId && (activeHeldOrder.items?.length ?? 0) > 0
+    );
+  }, [posDisabled, activeHeldOrder]);
+
+  const loadHeldOrder = () => {
+    if (posDisabled) return;
+
+    const snap = activeHeldOrder ?? readHeldSnapshot();
+    if (!snap?.orderId) return;
+
+    // unhold
+    setOrdersInfo((prev) => {
+      const idx = prev.findIndex((o) => o.orderId === snap.orderId);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            orderId: snap.orderId,
+            tableIds: snap.tableIds?.length ? snap.tableIds : [0],
+            items: snap.items ?? [],
+            isHeld: false,
+          },
+        ];
+      }
+      const copy = [...prev];
+      copy[idx] = {
+        ...copy[idx],
+        isHeld: false,
+        items: snap.items ?? copy[idx].items,
+      };
+      return copy;
+    });
+
+    setCurrentOrderId(snap.orderId);
+
+    const tableId =
+      snap.tableIds?.length && snap.tableIds[0] !== 0 ? snap.tableIds[0] : null;
+
+    setCurrentTableId(tableId);
+
+    setOrder({
+      id: snap.orderId,
+      guests: 0,
+      items: snap.items ?? [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    clearHeldSnapshot();
+    setHeldSnapshot(null);
+    setLastHeldOrderId(null);
+  };
 
   /* -------------------- render -------------------- */
   return (
@@ -1429,9 +1754,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
                     : "hover:bg-emerald-700"
                 }`}
-                disabled={posDisabled}
+                disabled={posDisabled || (!canHold && !canLoadHeld)}
+                onClick={canLoadHeld ? loadHeldOrder : holdOrder}
               >
-                {t.POS.hold}
+                {canLoadHeld ? "Load" : t.POS.hold}
               </button>
               <button
                 className={`rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50${
@@ -1526,7 +1852,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                               {li.name}
                             </span>
                             <span className="rounded-full bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                              {li.kitchen}
+                              {kitchenStations.find(
+                                (k) => k.ks_id === li.stationId
+                              )?.ks_name ?? "—"}
                             </span>
                             {!li.sentToKitchen && (
                               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
@@ -1571,16 +1899,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
                                   : "hover:bg-emerald-700"
                               }`}
-                              onClick={() =>
-                                setOrder((o: any) => ({
-                                  ...o,
-                                  items: o.items.map((x: any) =>
-                                    x.uid === li.uid
-                                      ? { ...x, qty: Math.max(1, x.qty - 1) }
-                                      : x
-                                  ),
-                                }))
-                              }
+                              onClick={() => updateLineQty(li.uid, -1)}
                             >
                               <Minus className="h-4 w-4" />
                             </button>
@@ -1596,16 +1915,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
                                   : "hover:bg-emerald-700"
                               }`}
-                              onClick={() =>
-                                setOrder((o: any) => ({
-                                  ...o,
-                                  items: o.items.map((x: any) =>
-                                    x.uid === li.uid
-                                      ? { ...x, qty: x.qty + 1 }
-                                      : x
-                                  ),
-                                }))
-                              }
+                              onClick={() => updateLineQty(li.uid, +1)}
                             >
                               <Plus className="h-4 w-4" />
                             </button>
@@ -1753,7 +2063,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
             <div className="flex flex-col items-center justify-between gap-2 w-full">
               <button
-                disabled={order.items.length === 0 && posDisabled}
+                disabled={order.items.length === 0 || posDisabled}
                 onClick={sendToKitchen}
                 className={`w-full group flex items-center justify-center items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50${
                   posDisabled
@@ -2775,18 +3085,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     {t.POS.kitchenStation}
                   </label>
                   <select
-                    value={editLine.kitchen}
+                    value={editLine.stationId}
                     onChange={(e) =>
                       setEditLine((l: any) =>
-                        l
-                          ? { ...l, kitchen: e.target.value as KitchenRoute }
-                          : l
+                        l ? { ...l, stationId: Number(e.target.value) } : l
                       )
                     }
                     className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
                   >
-                    {KITCHEN_STATIONS.map((k) => (
-                      <option key={k}>{k}</option>
+                    {kitchenStations.map((k) => (
+                      <option key={k.ks_id} value={k.ks_id}>
+                        {k.ks_name}
+                      </option>
                     ))}
                   </select>
                 </div>

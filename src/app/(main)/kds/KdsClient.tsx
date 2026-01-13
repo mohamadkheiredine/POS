@@ -41,12 +41,11 @@ type KdsTicket = {
 
 type StatusColumn = {
   id: number;
-  title: string; 
-  tickets: KdsTicket[]; 
+  title: string;
+  tickets: KdsTicket[];
 };
 
 type StatusInfo = { id: number; title: string };
-
 
 const elapsedMin = (ms: number) =>
   Math.max(0, Math.floor((Date.now() - ms) / 60000));
@@ -250,7 +249,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   const laneCls =
-    "min-h-[60vh] rounded-3xl bg-white/80 backdrop-blur-xl ring-1 ring-white/60 shadow-sm p-3";
+    "min-h-[60vh] w-full rounded-3xl bg-white/80 backdrop-blur-xl ring-1 ring-white/60 shadow-sm p-3";
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
@@ -316,7 +315,12 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+        <div
+          className="grid gap-4"
+          style={{
+            gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
+          }}
+        >
           {columns.map((col) => (
             <div
               key={col.id}
