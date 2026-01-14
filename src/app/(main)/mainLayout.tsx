@@ -127,7 +127,11 @@ export default function MainLayout({
               expanded={openSections.foh}
               onToggle={() => toggleSection("foh")}
               items={[
-                { href: "/floor", label: t.menu.floor, icon: <Home size={16} /> },
+                {
+                  href: "/floor",
+                  label: t.menu.floor,
+                  icon: <Home size={16} />,
+                },
                 {
                   href: "/pos",
                   label: t.menu.pos,
@@ -163,7 +167,11 @@ export default function MainLayout({
                   label: t.menu.kds,
                   icon: <ChefHat size={16} />,
                 },
-                { href: "/prep", label: t.menu.prep, icon: <Salad size={16} /> },
+                {
+                  href: "/prep",
+                  label: t.menu.prep,
+                  icon: <Salad size={16} />,
+                },
               ]}
             />
 
@@ -277,6 +285,11 @@ export default function MainLayout({
                 {
                   href: "/cash/drawer",
                   label: t.menu.cash_drawer,
+                  icon: <DollarSign size={16} />,
+                },
+                {
+                  href: "/currencies",
+                  label: 'Currencies',
                   icon: <DollarSign size={16} />,
                 },
                 {
