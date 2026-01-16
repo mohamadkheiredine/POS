@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import React, { use, useEffect, useState } from "react";
 import LanguageSwitch from "@/components/shared/language-switch";
 import { useI18n } from "@/hooks/useI18n";
+import LoginSwitch from "@/components/shared/loginSwitch";
 
 export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const [username, setUsername] = useState("");
@@ -75,6 +76,7 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
     <div className="w-full max-w-xl">
       <div className="relative mx-auto overflow-hidden rounded-3xl bg-white/70 backdrop-blur-2xl shadow-[0_20px_60px_rgba(17,24,39,0.18)] ring-1 ring-white/60">
         {/* Accent ribbon */}
+        <LoginSwitch />
 
         {/* Header */}
         <div className="relative flex items-center gap-3 px-8 pt-8">
@@ -94,6 +96,7 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
             {t.login.title}
           </h1>
           <p className="mt-1 text-sm text-gray-600">{t.login.subtitle}</p>
+          
 
           <form onSubmit={handleSubmit} className="mt-7 space-y-5">
             {/* Username (floating label) */}

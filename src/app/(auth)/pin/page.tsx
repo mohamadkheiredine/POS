@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 import React, { useEffect, useRef, useState } from "react";
+import LoginSwitch from "@/components/shared/loginSwitch";
+
 
 const PIN_LENGTH = 5;
 
@@ -102,6 +104,7 @@ export default function PinLoginPage() {
   return (
     <div className="w-full max-w-md">
       <div className="mx-auto overflow-hidden rounded-3xl bg-white/70 backdrop-blur-xl shadow-[0_20px_60px_rgba(17,24,39,0.18)] ring-1 ring-white/60">
+      <LoginSwitch />
         {/* header */}
         <div className="flex items-center gap-3 px-8 pt-8">
           <Image
@@ -115,6 +118,7 @@ export default function PinLoginPage() {
         </div>
 
         <div className="px-8 pb-8 pt-4">
+          
           <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">
             Quick sign-in
           </h1>
