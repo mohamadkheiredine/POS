@@ -60,8 +60,8 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
       localStorage.setItem("store_id", data.store_id);
       localStorage.setItem("company_id", data.company_id);
 
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("expires_in", String(data.expires_in));
+      // localStorage.setItem("access_token", data.access_token);
+      // localStorage.setItem("expires_in", String(data.expires_in));
 
       router.push("/pos");
       console.log("Login with", { username, password });

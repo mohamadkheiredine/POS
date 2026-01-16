@@ -358,13 +358,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setCurrencySymbol(localStorage.getItem("currency_symbol") || "");
   }, []);
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
+  // useEffect(() => {
+  //   const token = localStorage.getItem("access_token");
 
-    if (!token) {
-      forceLogout("You are not logged in. Please login.");
-    }
-  }, []);
+  //   if (!token) {
+  //     forceLogout("You are not logged in. Please login.");
+  //   }
+  // }, []);
 
   const loadMenu = async () => {
     const res = await api.get(
@@ -3442,26 +3442,50 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                       return;
                     }
 
-                    localStorage.setItem("g_hash", res.data.g_hash);
-                    localStorage.setItem("user_id", String(res.data.user_id));
+                    const data = res.data;
+
+                    localStorage.clear();
+                    localStorage.setItem("user_id", String(data.user_id));
                     localStorage.setItem(
-                      "company_id",
-                      String(res.data.company_id)
+                      "user_profile_url",
+                      data.user_profile_url
                     );
-                    localStorage.setItem("store_id", String(res.data.store_id));
+                    localStorage.setItem("user_fullname", data.user_fullname);
+                    localStorage.setItem("user_email", data.user_email);
+                    localStorage.setItem("user_name", data.user_name);
+
+                    localStorage.setItem(
+                      "company_currency",
+                      String(data.company_currency)
+                    );
+                    localStorage.setItem(
+                      "sec_company_currency",
+                      String(data.sec_company_currency)
+                    );
+                    localStorage.setItem(
+                      "sec_currency_symbol",
+                      data.sec_currency_symbol
+                    );
+
                     localStorage.setItem(
                       "warehouse_id",
-                      String(res.data.warehouse_id)
+                      String(data.warehouse_id)
                     );
-
                     localStorage.setItem(
-                      "user_fullname",
-                      res.data.user_fullname
+                      "exchange_rate",
+                      String(data.exchange_rate)
                     );
-                    localStorage.setItem("user_type", res.data.user_type);
 
-                    window.location.reload();
-                  } catch {
+                    localStorage.setItem("g_hash", data.g_hash);
+                    localStorage.setItem("store_id", String(data.store_id));
+                    localStorage.setItem("company_id", String(data.company_id));
+
+                    // localStorage.setItem("access_token", res.data.access_token);
+
+                    localStorage.setItem("orders_info", JSON.stringify([]));
+
+                    window.location.href = "/pos";
+                  } catch (e) {
                     setSwitchError("Switch failed");
                   } finally {
                     setSwitchLoading(false);

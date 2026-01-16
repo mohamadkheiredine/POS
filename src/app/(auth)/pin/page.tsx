@@ -15,7 +15,6 @@ export default function PinLoginPage() {
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-
   // Focus the hidden input so keyboard works
   useEffect(() => {
     hiddenInputRef.current?.focus();
@@ -43,7 +42,6 @@ export default function PinLoginPage() {
     }
   };
 
-
   const onSubmit = async () => {
     if (pin.length !== PIN_LENGTH) {
       setError(`Enter ${PIN_LENGTH}-digit PIN.`);
@@ -60,14 +58,31 @@ export default function PinLoginPage() {
         return;
       }
 
-      localStorage.setItem("g_hash", res.data.g_hash);
-      localStorage.setItem("user_id", String(res.data.user_id));
-      localStorage.setItem("company_id", String(res.data.company_id));
-      localStorage.setItem("store_id", String(res.data.store_id));
-      localStorage.setItem("warehouse_id", String(res.data.warehouse_id));
+      const data = res.data;
+
+      localStorage.setItem("user_id", data.user_id);
+      localStorage.setItem("user_profile_url", data.user_profile_url);
+      localStorage.setItem("user_fullname", data.user_fullname);
+      localStorage.setItem("user_email", data.user_email);
+      localStorage.setItem("user_name", data.user_name);
+
+      localStorage.setItem("company_currency", data.company_currency);
+      localStorage.setItem("currency_symbol", data.currency_symbol);
+
+      localStorage.setItem("sec_company_currency", data.sec_currency_id);
+      localStorage.setItem("sec_currency_symbol", data.sec_currency_symbol);
+
+      localStorage.setItem("warehouse_id", data.warehouse_id);
+      localStorage.setItem("exchange_rate", data.exchange_rate);
+
+      localStorage.setItem("g_hash", data.g_hash);
+      localStorage.setItem("store_id", data.store_id);
+      localStorage.setItem("company_id", data.company_id);
+
+      // localStorage.setItem("access_token", data.access_token);
+      // localStorage.setItem("expires_in", String(data.expires_in));
 
       router.push("/pos");
-
     } catch (e) {
       setError("Login failed. Try again.");
     } finally {
