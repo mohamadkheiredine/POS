@@ -20,7 +20,7 @@ type Order = {
   code: string;
   warehouse: number;
   total: number;
-  currencyCode: string; 
+  currencyCode: string;
   createdAt: string;
 };
 
@@ -35,7 +35,6 @@ type DateFilter =
 // Utils
 const money = (n: number, code: string) =>
   `${code} ${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-
 
 // ───────────────────────────────
 // Page
@@ -97,6 +96,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
   const [warehouse, setWarehouse] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
 
   const [drawer, setDrawer] = useState<{ open: boolean; order?: Order | null }>(
     { open: false, order: null }
@@ -106,13 +106,13 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
   const { t } = useI18n(lang);
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
+  // useEffect(() => {
+  //   const token = localStorage.getItem("access_token");
 
-    if (!token) {
-      forceLogout("You are not logged in. Please login.");
-    }
-  }, []);
+  //   if (!token) {
+  //     forceLogout("You are not logged in. Please login.");
+  //   }
+  // }, []);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -244,21 +244,39 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
       );
 
       if (res.data?.is_error === 0) {
-        const receiptHtml = res.data.receipt_html;
-
-        const w = window.open("", "_blank");
-        if (w) {
-          w.document.write(receiptHtml);
-          w.document.close();
-          w.focus();
-          w.print();
-        }
+        setReceiptHTML(res.data.receipt_html);
       } else {
-        alert("Failed to load order receipt");
+        alert("Failed to load receipt");
       }
-    } catch (e) {
+    } catch {
       alert("Print failed");
     }
+  };
+
+  const printReceipt = () => {
+    if (!receiptHTML) return;
+
+    const iframe = document.getElementById("print-iframe") as HTMLIFrameElement;
+    const doc = iframe.contentWindow?.document;
+
+    doc?.open();
+    doc?.write(`
+    <html>
+      <head>
+        <style>
+          body { font-family: Arial; }
+          @page { margin: 0; }
+        </style>
+      </head>
+      <body>${receiptHTML}</body>
+    </html>
+  `);
+    doc?.close();
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    }, 200);
   };
 
   return (
@@ -395,6 +413,54 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
           </table>
         </div>
       </div>
+
+      {receiptHTML && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-3xl bg-white shadow-xl overflow-hidden">
+            {/* HEADER */}
+            <div className="flex items-center justify-between border-b px-6 py-3">
+              <h2 className="text-lg font-bold text-gray-900">
+                Receipt Preview
+              </h2>
+              <button
+                onClick={() => setReceiptHTML(null)}
+                className="rounded-lg p-1 hover:bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* CONTENT */}
+            <div className="p-5 max-h-[70vh] overflow-auto">
+              <div
+                className="receipt-preview"
+                dangerouslySetInnerHTML={{ __html: receiptHTML }}
+              />
+            </div>
+
+            {/* FOOTER */}
+            <div className="border-t px-6 py-3 flex justify-end gap-2">
+              <button
+                onClick={() => setReceiptHTML(null)}
+                className="rounded-xl border px-4 py-2 text-sm"
+              >
+                Close
+              </button>
+
+              <button
+                onClick={printReceipt}
+                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white"
+              >
+                <Printer className="inline h-4 w-4 mr-1" />
+                Print
+              </button>
+            </div>
+          </div>
+
+          {/* hidden iframe */}
+          <iframe id="print-iframe" className="hidden" />
+        </div>
+      )}
     </div>
   );
 }
