@@ -255,7 +255,7 @@ export default function CurrenciesPage() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-6 bg-white">
       <h1 className="text-2xl font-semibold mb-1">Currencies</h1>
       <p className="text-sm text-gray-500 mb-6">
         Manage allowed currencies and update their exchange rates.
