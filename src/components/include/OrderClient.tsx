@@ -18,7 +18,8 @@ type Status = "open" | "in-progress" | "served" | "paid" | "void";
 type Order = {
   id: number;
   code: string;
-  warehouse: number;
+  warehouseId: number;
+  warehouseName: string;
   total: number;
   currencyCode: string;
   createdAt: string;
@@ -106,6 +107,9 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
   const { t } = useI18n(lang);
 
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+
   // useEffect(() => {
   //   const token = localStorage.getItem("access_token");
 
@@ -142,7 +146,8 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
               code: o.fo_order_code,
               total: o.fo_total_amount,
               currencyCode: o.currency_code,
-              warehouse: o.warehouse_id,
+              warehouseId: o.warehouse_id,
+              warehouseName: o.warehouse_name,
               createdAt: o.fo_order_datetime,
             }))
           );
@@ -164,9 +169,9 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
     return orders.filter((o) => {
       const code = (o.code ?? "").toString().toLowerCase();
-      const w = (o.warehouse ?? "").toString();
+      const warehouse = (o.warehouseName ?? "").toString().toLowerCase();
 
-      return code.includes(t) || w.includes(t);
+      return code.includes(t) || warehouse.includes(t);
     });
   }, [orders, search]);
 
@@ -176,7 +181,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
       filtered.map((o) => ({
         Code: o.code,
         Total: money(o.total, o.currencyCode),
-        Warehouse: o.warehouse,
+        Warehouse: o.warehouseName,
         Created: new Date(o.createdAt).toLocaleString(),
       }))
     );
@@ -204,7 +209,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
     const tableRows = filtered.map((o) => [
       o.code,
-      o.warehouse ?? "",
+      o.warehouseName ?? "",
       money(o.total, o.currencyCode),
       new Date(o.createdAt).toLocaleString(),
     ]);
@@ -278,6 +283,17 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
       iframe.contentWindow?.print();
     }, 200);
   };
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+
+  const paginated = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, dateFilter, dateFrom, dateTo]);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
@@ -381,10 +397,10 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
               )}
 
               {!loading &&
-                filtered.map((o) => (
+                paginated.map((o) => (
                   <tr key={o.id} className="[&>td]:px-3 [&>td]:py-3">
                     <td className="font-semibold text-gray-900">{o.code}</td>
-                    <td>{o.warehouse ?? 0}</td>
+                    <td>{o.warehouseName}</td>
                     <td className="text-left font-semibold">
                       {money(o.total, o.currencyCode)}
                     </td>
@@ -411,6 +427,32 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
               )}
             </tbody>
           </table>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm text-gray-600">
+                Page {page} of {totalPages}
+              </span>
+
+              <div className="flex gap-2">
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="rounded-xl border px-3 py-1 text-sm disabled:opacity-40"
+                >
+                  Prev
+                </button>
+
+                <button
+                  disabled={page === totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="rounded-xl border px-3 py-1 text-sm disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
