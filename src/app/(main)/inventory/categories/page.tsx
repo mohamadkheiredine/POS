@@ -171,7 +171,7 @@ export default function CategoriesPage() {
                       <button
                         onClick={() =>
                           router.push(
-                            `/inventory/categories/${c.pc_id}/editCategory`
+                            `/inventory/categories/${c.pc_id}/edit`
                           )
                         }
                         className="rounded-lg border px-2 py-1 text-xs"

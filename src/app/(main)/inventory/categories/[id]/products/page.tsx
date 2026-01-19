@@ -120,7 +120,7 @@ async function apiGetLotsByProductId(product_id: number) {
 export default function InventoryItemsPage() {
   const router = useRouter();
   const params = useParams();
-  const categoryId = Number(params.categoryId);
+  const categoryId = Number(params.id);
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -348,7 +348,6 @@ export default function InventoryItemsPage() {
     [drawer.itemId, items]
   );
 
-
   const openTransfer = (item: InventoryItem, lotId?: string) => {
     setMove({ open: true, item, lotId });
   };
@@ -526,7 +525,6 @@ export default function InventoryItemsPage() {
           </div>
         </div>
 
-        
         <div className="overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl ring-1 ring-white/60 shadow-sm">
           <table className="w-full text-sm">
             <thead className="bg-white text-left text-gray-500">

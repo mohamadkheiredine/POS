@@ -23,11 +23,13 @@ import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
 import { PlusSquare } from "lucide-react";
 import EditOrderPopup from "@/components/include/editOrderPopup";
+import LoadOrderPopup from "@/components/include/editOrderPopup";
 import { OrderItemUI } from "@/components/include/editOrderPopup";
+
 import type {
-  ModifierGroup as PopupModifierGroup,
-  ModifierOption as PopupModifierOption,
-} from "./editOrderPopup";
+  PopupModifierGroup,
+  PopupModifierOption,
+} from "@/types/modifiers";
 
 /* =============================================================================
  * Types
@@ -130,6 +132,11 @@ const money = (n: number, d = 2) =>
     maximumFractionDigits: d,
   });
 
+function normalizeNote(note?: string | null): string {
+  if (!note) return "";
+  return String(note).trim();
+}
+
 function priceFromModifiers(
   groups: ModifierGroup[] | undefined,
   selected: AppliedModifier[]
@@ -153,6 +160,12 @@ type HeldSnapshot = {
   tableIds: number[];
   items: OrderItem[];
   heldAt: number;
+};
+
+export type LoadOrderPayload = {
+  orderId: number;
+  tableIds: number[];
+  items: any[];
 };
 
 function readHeldSnapshot(): HeldSnapshot | null {
@@ -227,6 +240,66 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [switchPin, setSwitchPin] = useState("");
   const [switchError, setSwitchError] = useState("");
   const [switchLoading, setSwitchLoading] = useState(false);
+  const [loadOrderOpen, setLoadOrderOpen] = useState(false);
+  const [loadingOrder, setLoadingOrder] = useState(false);
+
+  const onLoadOrder = (payload: LoadOrderPayload) => {
+    const { orderId, tableIds, items } = payload;
+    setEditingOrderId(orderId);
+
+    const oid = String(orderId);
+
+    // convert UI items → POS items
+    const mappedItems: OrderItem[] = items.map((it) => {
+      const menuItem = menu.find((m) => m.id === it.itemId);
+
+      const mods: AppliedModifier[] = (it.modifiers ?? []).map((m: any) => ({
+        groupId: "options" as any,
+        optionId: Number(m.modifier_id),
+      }));
+
+      const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
+
+      return {
+        uid: uid(),
+        itemId: it.itemId,
+        name: menuItem?.name ?? it.itemName,
+        qty: it.qty,
+        basePrice: Number(menuItem?.price ?? it.unit_price),
+        stationId: it.stationId,
+        note: normalizeNote(it.notes),
+        modifiers: mods,
+        priceExtra: extra,
+        sentToKitchen: true,
+      };
+    });
+
+    const localOrder: LocalOrder = {
+      orderId: oid,
+      tableIds: tableIds.length ? tableIds : [0],
+      items: mappedItems,
+      isHeld: false,
+    };
+
+    // update ordersInfo
+    setOrdersInfo((prev) => {
+      const filtered = prev.filter((o) => o.orderId !== oid);
+      return [...filtered, localOrder];
+    });
+
+    setCurrentOrderId(oid);
+    setCurrentTableId(tableIds[0] ?? null);
+
+    setOrder({
+      id: oid,
+      guests: 0,
+      items: mappedItems,
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    setLoadOrderOpen(false);
+  };
 
   const PIN_LENGTH = 5;
 
@@ -553,7 +626,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       unit_price: li.basePrice + li.priceExtra,
       notes: li.note ?? "",
       modifiers: li.modifiers.map((m: any) => ({
-        modifier_id: m.optionId,
+        modifier_id: Number(m.optionId),
         name:
           menu
             .find((it) => it.id === li.itemId)
@@ -569,7 +642,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }));
 
     setEditingItems(mapped);
-    setEditPopupOpen(true);
+    setOriginalItems(mapped); // ✅ THIS IS THE IMPORTANT LINE
   };
 
   const saveEditedOrder = async (
@@ -615,6 +688,40 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       alert("Order updated successfully");
 
+      const newLocalItems: OrderItem[] = editingItems.map((it) => {
+        const menuItem = menu.find((m) => m.id === it.itemId);
+        const mods: AppliedModifier[] = (it.modifiers ?? []).map((mm) => ({
+          groupId: "options" as any,
+          optionId: Number(mm.modifier_id),
+        }));
+        const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
+
+        return {
+          uid: uid(),
+          itemId: it.itemId,
+          name: menuItem?.name ?? it.itemName,
+          qty: it.qty,
+          basePrice: Number(menuItem?.price ?? it.unit_price),
+          stationId: it.stationId,
+          note: normalizeNote(it.notes),
+          modifiers: mods,
+          priceExtra: extra,
+          sentToKitchen: true,
+        };
+      });
+
+      setOrder((prev: any) => ({
+        ...prev,
+        items: newLocalItems,
+      }));
+
+      setOrdersInfo((prev) =>
+        prev.map((o) =>
+          o.orderId === String(orderId) ? { ...o, items: newLocalItems } : o
+        )
+      );
+
+      setOriginalItems(editingItems);
       setEditPopupOpen(false);
     } catch (e: any) {
       alert(e?.response?.data?.error_message || "Failed to update order");
@@ -750,6 +857,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       mergeTables(firstMergeTable, table.id);
       setMergeMode(false);
       setFirstMergeTable(null);
+      return;
+    }
+
+    // ✅ If editing a backend order, never create a new empty order
+    if (editingOrderId) {
+      const oid = String(editingOrderId);
+
+      setCurrentOrderId(oid);
+      setCurrentTableId(table.id);
+
+      setOrdersInfo((prev) =>
+        prev.map((o) =>
+          o.orderId === oid ? { ...o, tableIds: [table.id] } : o
+        )
+      );
+
+      // keep UI ticket in sync too
+      setOrder((prev: any) => ({ ...prev, id: oid }));
+
       return;
     }
 
@@ -994,7 +1120,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   const sendToKitchen = async () => {
-    const orderData = ordersInfo.find((o) => o.orderId === order.id);
+    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+
     if (!orderData) return alert("Order not found");
 
     if (!g_hash || !user_id) return alert("Missing auth");
@@ -1004,7 +1131,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       user_id,
       customer_id: 0,
 
-      order_id: order.id,
+      order_id: currentOrderId,
       order_type: "dine_in",
       table_ids: orderData.tableIds.join(","),
 
@@ -1041,8 +1168,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       alert("Order sent to kitchen (print queued)");
 
-      setOrdersInfo((prev) => prev.filter((o) => o.orderId !== order.id));
+      setOrdersInfo((prev) => prev.filter((o) => o.orderId !== currentOrderId));
+
       setCurrentTableId(null);
+      setCurrentOrderId(null);
     } catch (error) {}
   };
 
@@ -1139,27 +1268,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const displayRate = selectedCur?.rate ?? 1;
     const displayCode = selectedCur?.currencyCode ?? CurrencySymbol;
 
-    const formattedItems = orderData.items.map((li) => ({
-      item_id: Number(li.itemId),
-      quantity: li.qty,
-      price: (li.basePrice + li.priceExtra) * displayRate,
-      discount: 0,
-      station_id: 1,
-      notes: li.note || "",
-      modifiers: li.modifiers.map((m) => ({
-        id: m.optionId,
-        name:
-          menu
-            .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
-            ?.options.find((o: any) => o.id === m.optionId)?.name || "",
-        price:
-          menu
-            .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
-            ?.options.find((o: any) => o.id === m.optionId)?.priceDelta || 0,
-      })),
-    }));
+    const formattedItems = orderData.items.map((li) => {
+      const unitBase = li.basePrice + li.priceExtra;
+
+      return {
+        item_id: Number(li.itemId),
+        quantity: li.qty,
+        unit_price: unitBase,
+
+        price: unitBase * displayRate,
+
+        discount: 0,
+        // station_id: li.stationId,
+        notes: li.note || "",
+
+        modifiers: li.modifiers.map((m) => ({
+          id: m.optionId,
+        })),
+      };
+    });
 
     let customer_id = 0;
     let delName = "";
@@ -1199,10 +1326,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const displayCurrencyId = selectedCur?.currencyId;
 
     const payload = {
+      order_id: editingOrderId,
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
       company_id: localStorage.getItem("company_id"),
+      store_id: localStorage.getItem("store_id"),
 
       currency_id: baseCurrencyId,
       currency_display_id: Number(displayCurrencyId),
@@ -1229,6 +1358,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       order_items: JSON.stringify(formattedItems),
     };
+    console.log("payload ", payload);
 
     let response;
 
@@ -1328,6 +1458,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
   const startNewOrder = () => {
     const newId = uid();
+
+    setEditingOrderId(null);
 
     setCurrentTableId(null);
     setCurrentOrderId(newId);
@@ -1839,7 +1971,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               </button>
 
               <button
-                onClick={() => setEditPopupOpen(true)}
+                onClick={() => {
+                  setLoadOrderOpen(true);
+                }}
                 className="rounded-xl border px-3 py-2 text-xs font-semibold"
               >
                 <Edit3 className="h-4 w-4" />
@@ -2409,15 +2543,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         </div>
       )}
 
-      {editPopupOpen && (
-        <EditOrderPopup
-          open={editPopupOpen}
-          onClose={() => setEditPopupOpen(false)}
-          items={editingItems}
-          onChangeItems={setEditingItems}
-          availableModifierGroupsByItemId={modifierGroupsByItemId}
-          onSave={saveEditedOrder}
-          saving={savingEdit}
+      {loadOrderOpen && (
+        <LoadOrderPopup
+          open={loadOrderOpen}
+          onClose={() => setLoadOrderOpen(false)}
+          onLoadOrder={onLoadOrder}
         />
       )}
 

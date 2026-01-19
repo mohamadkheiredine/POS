@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import KdsClient from "./KdsClient";
+import KdsClient from "@/components/include/KdsClient";
 
 export default async function PosPage() {
   const cookieStore = await cookies();

@@ -14,7 +14,7 @@ export default function EditCategoryPage() {
   const router = useRouter();
   const params = useParams();
 
-  const categoryId = Number(params.categoryId);
+  const categoryId = Number(params.id);
 
   const [pcCategory, setPcCategory] = useState("");
   const [description, setDescription] = useState("");
@@ -112,7 +112,7 @@ export default function EditCategoryPage() {
         {
           user_id,
           g_hash,
-          pc_id: categoryId, // 👈 THIS makes it EDIT
+          pc_id: categoryId,
           pc_category: pcCategory.trim(),
           pc_description: description.trim(),
           fk_pc_id: 0,

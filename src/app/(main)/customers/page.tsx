@@ -7,6 +7,8 @@ import axios from "axios";
 import { api } from "@/lib/api";
 import { forceLogout } from "@/lib/logout";
 
+import { Grid as GridIcon, List as ListIcon } from "lucide-react";
+
 /* ─────────────────────────────────────────
  * Types
  * ───────────────────────────────────────── */
@@ -46,13 +48,17 @@ export default function POSCustomersPage() {
     customer?: Customer | null;
   }>({ open: false });
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
+  const [view, setView] = useState<"grid" | "list">("grid");
+  const PAGE_SIZE = 12;
+  const [page, setPage] = useState(1);
 
-    if (!token) {
-      forceLogout("You are not logged in. Please login.");
-    }
-  }, []);
+  // useEffect(() => {
+  //   const token = localStorage.getItem("access_token");
+
+  //   if (!token) {
+  //     forceLogout("You are not logged in. Please login.");
+  //   }
+  // }, []);
 
   const getCustomers = async () => {
     try {
@@ -224,6 +230,17 @@ export default function POSCustomersPage() {
     setCustomers((prev) => prev.filter((c) => c.id !== id));
   };
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, filter]);
+
+  const totalPages = Math.ceil(customers.length / PAGE_SIZE);
+
+  const paginatedCustomers = customers.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE
+  );
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
       <div className="mx-auto w-full max-w-7xl space-y-5">
@@ -248,48 +265,156 @@ export default function POSCustomersPage() {
 
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* LEFT */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name..."
-                className="w-80 rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+                className="w-80 rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm"
               />
             </div>
+
+            {/* Filter */}
             <div className="relative">
               <Filter className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value as any)}
-                className="rounded-2xl border border-gray-200 bg-white pl-9 pr-8 py-2 text-sm"
-              >
-                {["All", "Dine-in", "Takeaway", "Delivery"].map((f) => (
-                  <option key={f}>{f}</option>
-                ))}
+              <select className="rounded-2xl border border-gray-200 bg-white pl-9 pr-8 py-2 text-sm">
+                <option>All</option>
               </select>
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="ml-auto">
+            <div className="rounded-2xl border border-gray-200 bg-white p-1">
+              <button
+                onClick={() => setView("grid")}
+                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                  view === "grid"
+                    ? "bg-orange-50 text-orange-700"
+                    : "text-gray-700"
+                }`}
+              >
+                <GridIcon className="mr-1 inline h-4 w-4" /> Grid
+              </button>
+
+              <button
+                onClick={() => setView("list")}
+                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                  view === "list"
+                    ? "bg-orange-50 text-orange-700"
+                    : "text-gray-700"
+                }`}
+              >
+                <ListIcon className="mr-1 inline h-4 w-4" /> List
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Customer Cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {customers.map((c) => (
-            <CustomerCard
-              key={c.id}
-              customer={c}
-              startEdit={startEdit}
-              deleteCustomer={deleteCustomer}
-            />
-          ))}
+        {/* Customers Content */}
+        {view === "grid" && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {paginatedCustomers.map((c) => (
+              <CustomerCard
+                key={c.id}
+                customer={c}
+                startEdit={startEdit}
+                deleteCustomer={deleteCustomer}
+              />
+            ))}
 
-          {customers.length === 0 && (
-            <div className="col-span-full grid h-48 place-items-center rounded-3xl border border-dashed border-gray-200 bg-white/60 text-sm text-gray-500">
-              No customers found…
+            {paginatedCustomers.length === 0 && (
+              <div className="col-span-full grid h-48 place-items-center rounded-3xl border border-dashed border-gray-200 bg-white/60 text-sm text-gray-500">
+                No customers found…
+              </div>
+            )}
+          </div>
+        )}
+
+        {view === "list" && (
+          <div className="overflow-hidden rounded-3xl bg-white shadow ring-1 ring-gray-200">
+            <table className="w-full text-sm">
+              <thead className="bg-white text-left text-gray-500">
+                <tr className="[&>th]:py-3 [&>th]:px-3">
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100">
+                {paginatedCustomers.map((c) => (
+                  <tr key={c.id} className="[&>td]:px-3 [&>td]:py-3">
+                    <td className="font-semibold text-gray-900">{c.name}</td>
+                    <td>{c.phone || "—"}</td>
+                    <td>{c.email || "—"}</td>
+                    <td>{c.type}</td>
+                    <td>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          c.active
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-gray-100 text-gray-500"
+                        }`}
+                      >
+                        {c.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="text-right">
+                      <button
+                        onClick={() => startEdit(c)}
+                        className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {paginatedCustomers.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center text-gray-500">
+                      No customers found…
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-4">
+            <span className="text-xs text-gray-500">
+              Page {page} of {totalPages}
+            </span>
+
+            <div className="flex gap-2">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-xl border px-3 py-1 text-xs disabled:opacity-40"
+              >
+                Prev
+              </button>
+
+              <button
+                disabled={page === totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-xl border px-3 py-1 text-xs disabled:opacity-40"
+              >
+                Next
+              </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <p className="text-center text-xs text-gray-500 pt-6">
           © {new Date().getFullYear()}{" "}
