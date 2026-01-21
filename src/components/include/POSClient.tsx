@@ -300,7 +300,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const menuItem = menu.find((m) => m.id === it.itemId);
 
       const mods: AppliedModifier[] = (it.modifiers ?? []).map((m: any) => ({
-        groupId: "options" as any,
+        groupId: 1,
         optionId: Number(m.modifier_id),
       }));
 
@@ -508,7 +508,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         modifierGroups: USE_MODIFIERS
           ? [
               {
-                id: "options",
+                id: 1,
                 name: "Options",
                 type: "optional",
                 maxSelect: 0,
@@ -733,7 +733,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const newLocalItems: OrderItem[] = editingItems.map((it) => {
         const menuItem = menu.find((m) => m.id === it.itemId);
         const mods: AppliedModifier[] = (it.modifiers ?? []).map((mm) => ({
-          groupId: "options" as any,
+          groupId: 1,
           optionId: Number(mm.modifier_id),
         }));
         const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
@@ -1039,7 +1039,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
           const mods: AppliedModifier[] = (it.modifiers ?? []).map(
             (m: any) => ({
-              groupId: "options" as any,
+              groupId: 1,
               optionId: Number(m.id),
             }),
           );
