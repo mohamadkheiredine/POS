@@ -215,8 +215,8 @@ function orderItemsToUIItems(
       notes: li.note ?? "",
       modifiers: (li.modifiers ?? []).map((m: any) => ({
         modifier_id: Number(m.optionId),
-        name: "", // not needed for backend
-        price: 0, // not needed for backend
+        name: "",
+        price: 0,
         quantity: 1,
       })),
     };
@@ -1767,17 +1767,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       warehouse_id: localStorage.getItem("warehouse_id"),
 
       order_id: orderId,
-
-      original_items: JSON.stringify(
-        originalItems.map((it) => ({
-          item_id: it.itemId,
-          station_id: it.stationId,
-          quantity: it.qty,
-          unit_price: it.unit_price,
-          notes: it.notes ?? "",
-          modifiers: it.modifiers ?? [],
-        })),
-      ),
 
       updated_items: JSON.stringify(
         updatedItems.map((it) => ({
