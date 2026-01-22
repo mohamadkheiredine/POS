@@ -274,10 +274,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [editingItems, setEditingItems] = useState<OrderItemUI[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const [switchUserOpen, setSwitchUserOpen] = useState(false);
-  const [switchPin, setSwitchPin] = useState("");
-  const [switchError, setSwitchError] = useState("");
-  const [switchLoading, setSwitchLoading] = useState(false);
   const [loadOrderOpen, setLoadOrderOpen] = useState(false);
   const [loadingOrder, setLoadingOrder] = useState(false);
 
@@ -343,8 +339,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     setLoadOrderOpen(false);
   };
-
-  const PIN_LENGTH = 5;
+  
 
   const convertPrice = (price: number) => {
     return price * currencyRate;
@@ -1797,22 +1792,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {t.POS.tables}
             </h2>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (order.items.length > 0) {
-                    alert(
-                      "Finish, hold, or clear the order before switching user.",
-                    );
-                    return;
-                  }
-                  setSwitchUserOpen(true);
-                  setSwitchPin("");
-                  setSwitchError("");
-                }}
-                className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold hover:bg-gray-50"
-              >
-                Switch User
-              </button>
 
               <button
                 className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
@@ -3565,145 +3544,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         </div>
       )}
 
-      {switchUserOpen && (
-        <div className="fixed inset-0 z-[999] grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-bold text-gray-900 mb-2">
-              Switch User
-            </h2>
-
-            <p className="text-sm text-gray-600 mb-4">Enter staff PIN</p>
-
-            <div className="flex justify-center gap-2 mb-4">
-              {Array.from({ length: PIN_LENGTH }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`h-10 w-10 rounded-xl border text-center leading-[40px] text-xl font-bold
-              ${
-                i < switchPin.length
-                  ? "bg-orange-100 border-orange-400 text-orange-600"
-                  : "bg-gray-50 border-gray-200 text-gray-400"
-              }`}
-                >
-                  {i < switchPin.length ? "•" : ""}
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"].map(
-                (k) => (
-                  <button
-                    key={k}
-                    className="h-12 rounded-xl border bg-white font-semibold hover:bg-gray-50"
-                    onClick={() => {
-                      if (k === "C") {
-                        setSwitchPin("");
-                        return;
-                      }
-                      if (k === "⌫") {
-                        setSwitchPin((p) => p.slice(0, -1));
-                        return;
-                      }
-                      if (switchPin.length < PIN_LENGTH) {
-                        setSwitchPin((p) => p + k);
-                      }
-                    }}
-                  >
-                    {k}
-                  </button>
-                ),
-              )}
-            </div>
-
-            {switchError && (
-              <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
-                {switchError}
-              </div>
-            )}
-
-            <div className="mt-4 flex justify-between">
-              <button
-                onClick={() => setSwitchUserOpen(false)}
-                className="rounded-xl border px-4 py-2 text-sm"
-              >
-                Cancel
-              </button>
-
-              <button
-                disabled={switchPin.length !== PIN_LENGTH || switchLoading}
-                onClick={async () => {
-                  setSwitchLoading(true);
-                  setSwitchError("");
-
-                  try {
-                    const res = await axios.post(
-                      `${process.env.NEXT_PUBLIC_API_LINK}/request/api/loginposbypin`,
-                      { pin: switchPin },
-                    );
-
-                    if (res.data?.is_error) {
-                      setSwitchError(res.data.error_message || "Invalid PIN");
-                      return;
-                    }
-
-                    const data = res.data;
-
-                    localStorage.clear();
-                    localStorage.setItem("user_id", String(data.user_id));
-                    localStorage.setItem(
-                      "user_profile_url",
-                      data.user_profile_url,
-                    );
-                    localStorage.setItem("user_fullname", data.user_fullname);
-                    localStorage.setItem("user_email", data.user_email);
-                    localStorage.setItem("user_name", data.user_name);
-
-                    localStorage.setItem(
-                      "company_currency",
-                      String(data.company_currency),
-                    );
-                    localStorage.setItem(
-                      "sec_company_currency",
-                      String(data.sec_company_currency),
-                    );
-                    localStorage.setItem(
-                      "sec_currency_symbol",
-                      data.sec_currency_symbol,
-                    );
-
-                    localStorage.setItem(
-                      "warehouse_id",
-                      String(data.warehouse_id),
-                    );
-                    localStorage.setItem(
-                      "exchange_rate",
-                      String(data.exchange_rate),
-                    );
-
-                    localStorage.setItem("g_hash", data.g_hash);
-                    localStorage.setItem("store_id", String(data.store_id));
-                    localStorage.setItem("company_id", String(data.company_id));
-
-                    // localStorage.setItem("access_token", res.data.access_token);
-
-                    localStorage.setItem("orders_info", JSON.stringify([]));
-
-                    window.location.href = "/pos";
-                  } catch (e) {
-                    setSwitchError("Switch failed");
-                  } finally {
-                    setSwitchLoading(false);
-                  }
-                }}
-                className="rounded-xl bg-orange-500 px-5 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {switchLoading ? "Switching..." : "Confirm"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
