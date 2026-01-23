@@ -81,7 +81,7 @@ export default function LoadOrderPopup({
             g_hash: localStorage.getItem("g_hash"),
             user_id: localStorage.getItem("user_id"),
           },
-        }
+        },
       );
 
       if (res.data?.is_error) {
@@ -99,10 +99,10 @@ export default function LoadOrderPopup({
         unit_price: Number(it.unit_price),
         notes: it.notes ?? "",
         modifiers: (it.modifiers ?? []).map((m: any) => ({
-          modifier_id: Number(m.id),
-          name: "",
-          price: 0,
-          quantity: 1,
+          modifier_id: Number(m.modifier_id),
+          name: String(m.name ?? ""),
+          price: Number(m.price ?? 0),
+          quantity: Number(m.quantity ?? 1),
         })),
       }));
 

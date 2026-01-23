@@ -40,8 +40,10 @@ type UID = number;
 type ModifierOption = {
   id: UID;
   name: string;
+  rowId: number;
   priceDelta?: number; // can be negative for remove
   default?: boolean;
+  quantity: number;
 };
 
 type ModifierGroup = {
@@ -68,6 +70,7 @@ type MenuItem = {
 type AppliedModifier = {
   groupId: UID;
   optionId: UID;
+  qty: number;
 };
 
 type OrderItem = {
@@ -140,14 +143,17 @@ function priceFromModifiers(
   groups: ModifierGroup[] | undefined,
   selected: AppliedModifier[],
 ): number {
-  if (!groups?.length || !selected.length) return 0;
-  let extra = 0;
-  for (const sel of selected) {
+  if (!groups || !selected.length) return 0;
+
+  return selected.reduce((sum, sel) => {
     const g = groups.find((gg) => gg.id === sel.groupId);
     const opt = g?.options.find((oo) => oo.id === sel.optionId);
-    extra += opt?.priceDelta || 0;
-  }
-  return extra;
+    return sum + (opt?.priceDelta ?? 0) * (sel.qty ?? 1);
+  }, 0);
+}
+function normalizeModifierQty(qty: any, fallback = 1) {
+  const n = Number(qty);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 const USE_MODIFIERS = process.env.NEXT_PUBLIC_USE_MODIFIER === "true";
@@ -213,12 +219,20 @@ function orderItemsToUIItems(
       qty: li.qty,
       unit_price: li.basePrice + li.priceExtra,
       notes: li.note ?? "",
-      modifiers: (li.modifiers ?? []).map((m: any) => ({
-        modifier_id: Number(m.optionId),
-        name: "",
-        price: 0,
-        quantity: 1,
-      })),
+      modifiers: (li.modifiers ?? []).map((m: any) => {
+        const item = menu.find((x) => x.id === li.itemId);
+        const group = item?.modifierGroups?.find(
+          (g: any) => g.id === m.groupId,
+        );
+        const opt = group?.options.find((o: any) => o.id === m.optionId);
+
+        return {
+          modifier_id: Number(m.optionId),
+          name: opt?.name ?? "",
+          price: Number(opt?.priceDelta ?? 0),
+          quantity: Number(m.quantity ?? m.qty ?? 1),
+        };
+      }),
     };
   });
 }
@@ -277,8 +291,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [loadOrderOpen, setLoadOrderOpen] = useState(false);
   const [loadingOrder, setLoadingOrder] = useState(false);
 
+  const [hydrated, setHydrated] = useState(false);
+
   const onLoadOrder = (payload: LoadOrderPayload) => {
     const { orderId, tableIds, items } = payload;
+    console.log("items ", items);
     setEditingOrderId(orderId);
 
     const snap =
@@ -291,26 +308,37 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const oid = String(orderId);
 
-    // convert UI items → POS items
     const mappedItems: OrderItem[] = items.map((it) => {
-      const menuItem = menu.find((m) => m.id === it.itemId);
+      const itemId = Number(it.item_id);
 
-      const mods: AppliedModifier[] = (it.modifiers ?? []).map((m: any) => ({
-        groupId: 1,
-        optionId: Number(m.modifier_id),
-      }));
+      const menuItem = menu.find((m) => m.id === itemId);
+
+      const mods: AppliedModifier[] = (it.modifiers ?? [])
+        .map((m: any) => {
+          const optionId = Number(m.modifier_id ?? m.id);
+
+          if (!optionId) return null;
+          return {
+            groupId: 1,
+            optionId,
+            qty: normalizeModifierQty(m.quantity),
+          };
+        })
+        .filter(Boolean) as AppliedModifier[];
+
+      console.log("mods ", mods);
 
       const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
 
       return {
         uid: uid(),
         itemId: it.itemId,
-        name: menuItem?.name ?? it.itemName,
+        name: it.itemName,
         qty: it.qty,
-        basePrice: Number(menuItem?.price ?? it.unit_price),
+        basePrice: Number(it.unit_price),
         stationId: it.stationId,
         note: normalizeNote(it.notes),
-        modifiers: mods,
+        modifiers: mods, // ✅ NOW EXISTS
         priceExtra: extra,
         sentToKitchen: true,
       };
@@ -339,7 +367,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     setLoadOrderOpen(false);
   };
-  
 
   const convertPrice = (price: number) => {
     return price * currencyRate;
@@ -407,7 +434,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   });
 
   const [modifiers, setModifiers] = useState<
-    { id: number; name: string; price: number }[]
+    { id: number; name: string; price: number; quantity: number }[]
   >([]);
   const [kitchenStations, setKitchenStations] = useState<KitchenStationDB[]>(
     [],
@@ -457,6 +484,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         id: m.m_id,
         name: m.m_modifier_name,
         price: Number(m.m_price_modifier),
+        quantity: Number(m.m_quantity),
       })),
     );
   };
@@ -476,6 +504,23 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   //     forceLogout("You are not logged in. Please login.");
   //   }
   // }, []);
+
+  async function fetchModifiersPerItem(itemId: number) {
+    const res = await api.get(
+      `${process.env.NEXT_PUBLIC_API_LINK}/api/inventory/getlistmodifiersperitem`,
+      {
+        params: {
+          g_hash: localStorage.getItem("g_hash"),
+          user_id: localStorage.getItem("user_id"),
+          item_id: itemId,
+        },
+      },
+    );
+
+    if (res.data?.is_error === 1) return [];
+
+    return res.data.data ?? [];
+  }
 
   const loadMenu = async () => {
     const res = await api.get(
@@ -500,21 +545,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         cc_id: it.cc_id,
         categoryName: it.category_name,
         kitchen_station_id: Number(it.mi_kitchen_station_id ?? 1),
-        modifierGroups: USE_MODIFIERS
-          ? [
-              {
-                id: 1,
-                name: "Options",
-                type: "optional",
-                maxSelect: 0,
-                options: modifiers.map((m) => ({
-                  id: m.id,
-                  name: m.name,
-                  priceDelta: Number(m.price),
-                })),
-              },
-            ]
-          : [],
+        modifierGroups: [],
       })),
     );
   };
@@ -609,15 +640,25 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const saved: any = localStorage.getItem("orders_info");
       try {
         const parsed: LocalOrder[] = JSON.parse(saved || "[]");
-        setOrdersInfo(parsed.filter((o) => o.items.length > 0 || o.isHeld));
+        setOrdersInfo(parsed);
 
         const actives = parsed
-          .filter(
-            (o) => o.tableIds && o.tableIds.length > 0 && o.items.length > 0,
-          )
+          // .filter(
+          //   (o) => o.tableIds && o.tableIds.length > 0,
+          // )
           .flatMap((o) => o.tableIds);
 
         setActiveTables([...new Set(actives)]);
+        setCurrentOrderId(null);
+        setCurrentTableId(null);
+        setOrder({
+          id: uid(),
+          guests: 0,
+          items: [],
+          createdAt: Date.now(),
+          status: "open",
+        });
+        setHydrated(true);
       } catch (e) {
         console.error("Failed to parse orders_info from localStorage", e);
       }
@@ -625,10 +666,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+    if (!hydrated) {
+      return;
     }
-  }, [ordersInfo]);
+    localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+  }, [ordersInfo, hydrated]);
+
+  // useEffect(() => {
+  //   if (typeof window !== "undefined") {
+  //     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
+  //   }
+  // }, [ordersInfo]);
 
   // Modals / Drawers
   const [modItem, setModItem] = useState<any>(null); // item being configured
@@ -654,118 +702,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const v = localStorage.getItem("last_held_order_id");
     if (v) setLastHeldOrderId(v);
   }, []);
-
-  const openEditPopup = () => {
-    const mapped: OrderItemUI[] = order.items.map((li: any) => ({
-      itemId: li.itemId,
-      itemName: li.name,
-      stationId: li.stationId,
-      qty: li.qty,
-      unit_price: li.basePrice + li.priceExtra,
-      notes: li.note ?? "",
-      modifiers: li.modifiers.map((m: any) => ({
-        modifier_id: Number(m.optionId),
-        name:
-          menu
-            .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
-            ?.options.find((o: any) => o.id === m.optionId)?.name || "",
-        price:
-          menu
-            .find((it) => it.id === li.itemId)
-            ?.modifierGroups?.find((g: any) => g.id === m.groupId)
-            ?.options.find((o: any) => o.id === m.optionId)?.priceDelta || 0,
-        quantity: 1,
-      })),
-    }));
-
-    setEditingItems(mapped);
-  };
-
-  const saveEditedOrder = async (
-    orderId: number,
-    originalItems: OrderItemUI[],
-  ) => {
-    setSavingEdit(true);
-
-    try {
-      await api.post(
-        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/editorder`,
-        {
-          g_hash,
-          user_id,
-          store_id: localStorage.getItem("store_id"),
-          warehouse_id: localStorage.getItem("warehouse_id"),
-
-          order_id: orderId,
-
-          original_items: JSON.stringify(
-            originalItems.map((it) => ({
-              item_id: it.itemId,
-              station_id: it.stationId,
-              quantity: it.qty,
-              unit_price: it.unit_price,
-              notes: it.notes ?? "",
-              modifiers: it.modifiers,
-            })),
-          ),
-
-          updated_items: JSON.stringify(
-            editingItems.map((it) => ({
-              item_id: it.itemId,
-              station_id: it.stationId,
-              quantity: it.qty,
-              unit_price: it.unit_price,
-              notes: it.notes ?? "",
-              modifiers: it.modifiers,
-            })),
-          ),
-        },
-      );
-
-      alert("Order updated successfully");
-
-      const newLocalItems: OrderItem[] = editingItems.map((it) => {
-        const menuItem = menu.find((m) => m.id === it.itemId);
-        const mods: AppliedModifier[] = (it.modifiers ?? []).map((mm) => ({
-          groupId: 1,
-          optionId: Number(mm.modifier_id),
-        }));
-        const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
-
-        return {
-          uid: uid(),
-          itemId: it.itemId,
-          name: menuItem?.name ?? it.itemName,
-          qty: it.qty,
-          basePrice: Number(menuItem?.price ?? it.unit_price),
-          stationId: it.stationId,
-          note: normalizeNote(it.notes),
-          modifiers: mods,
-          priceExtra: extra,
-          sentToKitchen: true,
-        };
-      });
-
-      setOrder((prev: any) => ({
-        ...prev,
-        items: newLocalItems,
-      }));
-
-      setOrdersInfo((prev) =>
-        prev.map((o) =>
-          o.orderId === String(orderId) ? { ...o, items: newLocalItems } : o,
-        ),
-      );
-
-      setOriginalItems(editingItems);
-      setEditPopupOpen(false);
-    } catch (e: any) {
-      alert(e?.response?.data?.error_message || "Failed to update order");
-    } finally {
-      setSavingEdit(false);
-    }
-  };
 
   const [hasOpenCash, setHasOpenCash] = useState<boolean | undefined>(
     undefined,
@@ -1012,7 +948,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         );
       })
       .catch(() => {
-        throw new Error("there is an error in make table active immediatly")
+        throw new Error("there is an error in make table active immediatly");
       });
   };
 
@@ -1032,12 +968,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         items: o.items.map((it: any) => {
           const menuItem = menu.find((m) => m.id === it.item_id);
 
-          const mods: AppliedModifier[] = (it.modifiers ?? []).map(
-            (m: any) => ({
+          const mods: AppliedModifier[] = (it.modifiers ?? []).map((m: any) => {
+            const optionId = Number(m.modifier_id);
+            return {
               groupId: 1,
-              optionId: Number(m.id),
-            }),
-          );
+              optionId,
+              qty: normalizeModifierQty(m.quantity ?? m.qty ?? 1),
+            };
+          });
 
           const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
 
@@ -1056,36 +994,55 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         }),
       }));
 
-      setOrdersInfo((prev) =>
-        upsertOrders(
-          prev.filter((o) => o.items.length > 0 || o.isHeld),
-          loadedOrders.filter((o) => o.items.length > 0),
-        ),
-      );
-    }
+      setOrdersInfo((prev) => {
+        const localOnly = prev.filter(
+          (o) =>
+            o.orderId.startsWith("tmp_") ||
+            o.isHeld ||
+            !loadedOrders.some((lo) => lo.orderId === o.orderId),
+        );
 
+        return upsertOrders(localOnly, loadedOrders);
+      });
+    }
     if (menu.length > 0) {
       loadPendingOrders();
     }
   }, [menu]);
 
-  const addItemStart = (item: any) => {
-    setModItem(item);
-    if (!USE_MODIFIERS) {
-      setModSelected([]);
-      setModQty(1);
-      return;
-    }
+  const addItemStart = async (item: any) => {
+    const rawModifiers = await fetchModifiersPerItem(item.id);
 
-    const selected: AppliedModifier[] = [];
-    item.modifierGroups?.forEach((g: any) => {
-      g.options.forEach((op: any) => {
-        if (op.default) selected.push({ groupId: g.id, optionId: op.id });
-      });
-    });
+    const modifierGroups: ModifierGroup[] = rawModifiers.length
+      ? [
+          {
+            id: 1,
+            name: "Options",
+            type: "optional",
+            maxSelect: 0,
+            options: rawModifiers.map((m: any) => {
+              const modifier = modifiers.find(
+                (x) => x.id === Number(m.fk_modifier_id),
+              );
 
-    setModSelected(selected);
-    setModQty(1);
+              return {
+                id: Number(m.fk_modifier_id),
+                rowId: Number(m.im_id),
+                name: modifier?.name ?? "",
+                priceDelta: modifier?.price ?? 0,
+                quantity: 1,
+              };
+            }),
+          },
+        ]
+      : [];
+
+    setMenu((prev) =>
+      prev.map((x) => (x.id === item.id ? { ...x, modifierGroups } : x)),
+    );
+
+    setModItem({ ...item, modifierGroups });
+    setModSelected([]);
   };
 
   const toggleModifier = (group: ModifierGroup, option: ModifierOption) => {
@@ -1093,30 +1050,21 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const exists = prev.some(
         (s) => s.groupId === group.id && s.optionId === option.id,
       );
-      const max = group.maxSelect ?? (group.type === "required" ? 1 : 0);
-      if (group.type === "required" && (max === 1 || !max)) {
-        const withoutGroup = prev.filter((s) => s.groupId !== group.id);
-        return exists
-          ? withoutGroup
-          : [...withoutGroup, { groupId: group.id, optionId: option.id }];
-      }
+
       if (exists) {
         return prev.filter(
           (s) => !(s.groupId === group.id && s.optionId === option.id),
         );
-      } else {
-        const inGroup = prev.filter((s) => s.groupId === group.id);
-        if (max && inGroup.length >= max) {
-          const others = prev.filter((s) => s.groupId !== group.id);
-          const keep = inGroup.slice(1);
-          return [
-            ...others,
-            ...keep,
-            { groupId: group.id, optionId: option.id },
-          ];
-        }
-        return [...prev, { groupId: group.id, optionId: option.id }];
       }
+
+      return [
+        ...prev,
+        {
+          groupId: group.id,
+          optionId: option.id,
+          qty: normalizeModifierQty(option.quantity, 1),
+        },
+      ];
     });
   };
 
@@ -1155,10 +1103,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       itemId: modItem.id,
       name: modItem.name,
       basePrice: modItem.price,
-      qty: modQty,
+      qty: 1,
       stationId: modItem.kitchen_station_id,
       note: "",
+
       modifiers: modSelected,
+
       priceExtra,
       sentToKitchen: false,
     };
@@ -1169,21 +1119,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       items: [...(o.items ?? []), newLine],
     }));
 
-    setOrdersInfo((prev) => {
-      const existing = prev.find((o) => o.orderId === orderId);
-
-      return upsertOrders(
-        prev.filter((o) => o.items.length > 0 || o.isHeld),
-        [
-          {
-            orderId,
-            tableIds: [currentTableId ?? 0],
-            items: [...(existing?.items ?? []), newLine],
-            isHeld: false,
-          },
-        ],
-      );
-    });
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === orderId ? { ...o, items: [...o.items, newLine] } : o,
+      ),
+    );
 
     if (editingOrderId) setEditDirty(true);
 
@@ -1341,7 +1281,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const displayRate = selectedCur?.rate ?? 1;
     const displayCode = selectedCur?.currencyCode ?? CurrencySymbol;
 
-    const formattedItems = orderData.items.map((li) => {
+    const formattedItems = order.items.map((li: any) => {
       const unitBase = li.basePrice + li.priceExtra;
 
       return {
@@ -1355,7 +1295,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         // station_id: li.stationId,
         notes: li.note || "",
 
-        modifiers: li.modifiers.map((m) => ({
+        modifiers: li.modifiers.map((m: any) => ({
           id: m.optionId,
         })),
       };
@@ -1366,18 +1306,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     let delPhone = "";
     let delAddress = "";
 
-    if (isTakeaway) {
-      if (selectedCustomer) {
-        customer_id = selectedCustomer.customer_id;
-        delName = selectedCustomer.customer_name ?? "";
-        delPhone = selectedCustomer.customer_mobile ?? "";
-        delAddress = selectedCustomer.customer_address ?? "";
-      }
-
-      if (customerName?.trim()) delName = customerName.trim();
-      if (customerPhone?.trim()) delPhone = customerPhone.trim();
-      if (customerAddress?.trim()) delAddress = customerAddress.trim();
+    if (selectedCustomer) {
+      customer_id = selectedCustomer.customer_id;
+      delName = selectedCustomer.customer_name ?? "";
+      delPhone = selectedCustomer.customer_mobile ?? "";
+      delAddress = selectedCustomer.customer_address ?? "";
     }
+
+    if (customerName?.trim()) delName = customerName.trim();
+    if (customerPhone?.trim()) delPhone = customerPhone.trim();
+    if (customerAddress?.trim()) delAddress = customerAddress.trim();
 
     const firstItem = orderData.items[0];
     const currencyId = menu.find((m) => m.id === firstItem.itemId)?.cc_id;
@@ -1432,11 +1370,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       order_items: JSON.stringify(formattedItems),
     };
-    console.log("payload ", payload);
 
     if (editingOrderId) {
       setEditingOrderId(null);
     } else {
+      console.log("payload ", payload);
       const response = await api.post(
         `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/createorder`,
         payload,
@@ -1792,7 +1730,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {t.POS.tables}
             </h2>
             <div className="flex items-center gap-2">
-
               <button
                 className={`rounded-xl border border-gray-200 bg-white px-2 py-1 text-xs font-semibold hover:bg-gray-50${
                   posDisabled
@@ -2087,7 +2024,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   const o = g?.options.find(
                                     (oo: any) => oo.id === m.optionId,
                                   );
-                                  return o?.name;
+                                  return `${o?.name} × ${m.qty}`;
                                 })
                                 .filter(Boolean)
                                 .join(", ")}
@@ -2179,21 +2116,20 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {currentTableId ? "Dine-In Order" : "Takeaway Order"}
             </div>
 
-            {!currentTableId && (
-              <button
-                disabled={posDisabled}
-                onClick={() => setCustomerDrawerOpen(true)}
-                className={`text-orange-600 text-sm font-semibold hover:underline${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-              >
-                {selectedCustomer
-                  ? selectedCustomer.customer_name
-                  : "Add Customer"}
-              </button>
-            )}
+            {/* {!currentTableId && ( */}
+            <button
+              disabled={posDisabled}
+              onClick={() => setCustomerDrawerOpen(true)}
+              className={`text-orange-600 text-sm font-semibold hover:underline${
+                posDisabled
+                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
+                  : "hover:bg-emerald-700"
+              }`}
+            >
+              {selectedCustomer
+                ? selectedCustomer.customer_name
+                : "Add Customer"}
+            </button>
           </div>
 
           {/* Totals + Actions */}
@@ -2292,25 +2228,27 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     : "hover:bg-emerald-700"
                 }`}
                 onClick={() => {
-                  const tableKey = currentTableId ?? 0;
+                  // const tableKey = currentTableId ?? 0;
+                  setCustomerDrawerOpen(true);
+                  setTakeawayPreview(true);
 
-                  if (tableKey === 0 && !selectedCustomer && !customerName) {
-                    setCustomerDrawerOpen(true);
-                    setTakeawayPreview(true);
-                  }
+                  // if (tableKey === 0 && !selectedCustomer && !customerName) {
+                  //   setCustomerDrawerOpen(true);
+                  //   setTakeawayPreview(true);
+                  // }
 
-                  if (tableKey === 0) {
-                    setCustomerDrawerOpen(true);
-                    return;
-                  }
+                  // if (tableKey === 0) {
+                  //   setCustomerDrawerOpen(true);
+                  //   return;
+                  // }
 
-                  setPreviewTotals({
-                    subtotal,
-                    total,
-                    discount: 0,
-                  });
+                  // setPreviewTotals({
+                  //   subtotal,
+                  //   total,
+                  //   discount: 0,
+                  // });
 
-                  setPreviewPopupOpen(true);
+                  // setPreviewPopupOpen(true);
                 }}
               >
                 {t.POS.payClose}
@@ -2325,7 +2263,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         // container of modal
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4">
           {/* the modal here */}
-          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white p-0 shadow-xl">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl bg-white p-0 shadow-xl">
+
             <div className="flex items-center justify-between border-b px-5 py-3">
               <div className="font-bold text-gray-900">{modItem.name}</div>
               <button
@@ -2349,7 +2288,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             >
               {/* Groups */}
               {USE_MODIFIERS && (
-                <div className="space-y-4">
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                   {modItem.modifierGroups?.map((g: any) => {
                     const inGroup = modSelected.filter(
                       (s) => s.groupId === g.id,
@@ -2376,41 +2315,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         </div>
                         <div className="space-y-1">
                           {g.options.map((op: any) => {
-                            const picked = inGroup.some(
-                              (s) => s.optionId === op.id,
+                            const selected = modSelected.find(
+                              (s) => s.groupId === g.id && s.optionId === op.id,
                             );
+
                             return (
-                              <button
-                                disabled={posDisabled}
-                                key={op.id}
-                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
-                              ${
-                                picked
-                                  ? "border-orange-300 bg-orange-50"
-                                  : "border-gray-200 bg-white hover:bg-gray-50"
-                              }${
-                                posDisabled
-                                  ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                                  : "hover:bg-emerald-700"
-                              }`}
-                                onClick={() => toggleModifier(g, op)}
+                              <div
+                                key={op.rowId}
+                                className="flex items-center justify-between rounded-xl border px-3 py-2"
                               >
-                                <span className="flex items-center gap-2">
-                                  {picked ? (
-                                    <SquareCheck className="h-4 w-4 text-orange-600" />
-                                  ) : (
-                                    <Square className="h-4 w-4 text-gray-400" />
-                                  )}
-                                  {op.name}
-                                </span>
-                                <span className="text-gray-700">
-                                  {op.priceDelta
-                                    ? op.priceDelta > 0
-                                      ? `+${money(op.priceDelta)}`
-                                      : `${money(op.priceDelta)}`
-                                    : ""}
-                                </span>
-                              </button>
+                                <span>{op.name}</span>
+
+                                {!selected ? (
+                                  <button
+                                    onClick={() => toggleModifier(g, op)}
+                                    className="px-2 py-1 text-xs rounded bg-orange-500 text-white"
+                                  >
+                                    Add
+                                  </button>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-xs text-gray-500">
+                                      quantity:{" "}
+                                      {Number.isFinite(op.quantity) &&
+                                      op.quantity > 0
+                                        ? op.quantity
+                                        : 1}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             );
                           })}
                         </div>
@@ -2423,37 +2357,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {/* Summary */}
               <div className="rounded-2xl border border-gray-200 bg-white p-4">
                 <div className="mb-2 text-sm text-gray-600">
-                  {t.POS.quantity}
+                  Item {t.POS.quantity}
                 </div>
                 <div className="mb-4 flex items-center gap-2">
-                  <button
-                    disabled={posDisabled}
-                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
-                      posDisabled
-                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                        : "hover:bg-emerald-700"
-                    }`}
-                    onClick={() => setModQty((q) => Math.max(1, q - 1))}
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <div className="w-10 text-center text-sm font-semibold">
-                    {modQty}
-                  </div>
-                  <button
-                    disabled={posDisabled}
-                    className={`rounded-lg border border-gray-200 bg-white p-2 hover:bg-gray-50${
-                      posDisabled
-                        ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                        : "hover:bg-emerald-700"
-                    }`}
-                    onClick={() => setModQty((q) => q + 1)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  <div className="text-sm font-semibold">Quantity: 1</div>
                 </div>
 
                 <div className="mb-2 text-sm text-gray-600">Chosen</div>
+
                 <ul className="mb-4 space-y-1 text-sm">
                   {modSelected.map((m) => {
                     const g = modItem.modifierGroups?.find(
@@ -2462,24 +2373,26 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     const o = g?.options.find(
                       (oo: any) => oo.id === m.optionId,
                     );
+
+                    const price = Number(o?.priceDelta ?? 0);
+                    const total = price * m.qty;
+
                     return (
                       <li
                         key={`${m.groupId}-${m.optionId}`}
                         className="flex items-center justify-between"
                       >
                         <span className="text-gray-700">
-                          {g?.name} · <b>{o?.name}</b>
+                          {o?.name} × {m.qty}
                         </span>
-                        <span className="text-gray-700">
-                          {o?.priceDelta
-                            ? o.priceDelta > 0
-                              ? `+${money(o.priceDelta)}`
-                              : `${money(o.priceDelta)}`
-                            : ""}
+
+                        <span className="text-gray-800 font-semibold">
+                          {CurrencySymbol} {money(convertPrice(total))}
                         </span>
                       </li>
                     );
                   })}
+
                   {modSelected.length === 0 && (
                     <li className="text-xs text-gray-500">
                       {t.POS.noModifiers}
@@ -3340,7 +3253,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                     ...l,
                                     modifiers: [
                                       ...filtered,
-                                      { groupId: g.id, optionId: op.id },
+                                      {
+                                        groupId: g.id,
+                                        optionId: op.id,
+                                        qty: normalizeModifierQty(
+                                          op.quantity ?? 1,
+                                        ),
+                                      },
                                     ],
                                   };
                             }
@@ -3368,7 +3287,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   modifiers: [
                                     ...others,
                                     ...keep,
-                                    { groupId: g.id, optionId: op.id },
+                                    {
+                                      groupId: g.id,
+                                      optionId: op.id,
+                                      qty: normalizeModifierQty(
+                                        op.quantity ?? 1,
+                                      ),
+                                    },
                                   ],
                                 };
                               }
@@ -3376,7 +3301,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                 ...l,
                                 modifiers: [
                                   ...l.modifiers,
-                                  { groupId: g.id, optionId: op.id },
+                                  {
+                                    groupId: g.id,
+                                    optionId: op.id,
+                                    qty: Number(op.quantity ?? 1),
+                                  },
                                 ],
                               };
                             }
@@ -3543,7 +3472,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }
