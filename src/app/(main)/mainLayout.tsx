@@ -301,8 +301,13 @@ export default function MainLayout({
                   icon: <DollarSign size={16} />,
                 },
                 {
-                  href: "/currencies",
+                  href: "/cash/currencies",
                   label: "Currencies",
+                  icon: <DollarSign size={16} />,
+                },
+                {
+                  href: "/cash/expenses",
+                  label: "Expenses",
                   icon: <DollarSign size={16} />,
                 },
                 {
