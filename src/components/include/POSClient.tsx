@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Plus,
@@ -156,6 +156,17 @@ function normalizeModifierQty(qty: any, fallback = 1) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function resolveModifierFromMaster(
+  master: { id: number; name: string; price: number }[],
+  optionId: number,
+) {
+  const m = master.find((x) => x.id === Number(optionId));
+  return {
+    name: m?.name ?? `#${optionId}`,
+    priceDelta: m?.price ?? 0,
+  };
+}
+
 const USE_MODIFIERS = process.env.NEXT_PUBLIC_USE_MODIFIER === "true";
 
 const HELD_ORDER_KEY = "pos_held_order_snapshot";
@@ -246,11 +257,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [menu, setMenu] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number>(0);
   const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
-  const [takeawayModalOpen, setTakeawayModalOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
-  const [takeawayCustomerId, setTakeawayCustomerId] = useState(0);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [customerResults, setCustomerResults] = useState<any>([]);
   const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
@@ -275,27 +284,19 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     null,
   );
 
-  const [editOrderCode, setEditOrderCode] = useState("");
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
-  const [originalOrderItems, setOriginalOrderItems] = useState<OrderItem[]>([]);
 
   // true if user changed anything since last sync
   const [editDirty, setEditDirty] = useState(false);
 
   const [originalItems, setOriginalItems] = useState<OrderItemUI[]>([]);
 
-  const [editPopupOpen, setEditPopupOpen] = useState(false);
-  const [editingItems, setEditingItems] = useState<OrderItemUI[]>([]);
-  const [savingEdit, setSavingEdit] = useState(false);
-
   const [loadOrderOpen, setLoadOrderOpen] = useState(false);
-  const [loadingOrder, setLoadingOrder] = useState(false);
-
   const [hydrated, setHydrated] = useState(false);
+  const modifiersCache = useRef<Record<number, ModifierGroup[]>>({});
 
   const onLoadOrder = (payload: LoadOrderPayload) => {
     const { orderId, tableIds, items } = payload;
-    console.log("items ", items);
     setEditingOrderId(orderId);
 
     const snap =
@@ -326,19 +327,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         })
         .filter(Boolean) as AppliedModifier[];
 
-      console.log("mods ", mods);
-
       const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
 
       return {
         uid: uid(),
-        itemId: it.itemId,
+        itemId,
         name: it.itemName,
         qty: it.qty,
         basePrice: Number(it.unit_price),
         stationId: it.stationId,
         note: normalizeNote(it.notes),
-        modifiers: mods, // ✅ NOW EXISTS
+        modifiers: mods,
         priceExtra: extra,
         sentToKitchen: true,
       };
@@ -398,7 +397,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       setAllowedCurrencies(mappedCurrencies);
 
-      // 🔑 apply default currency from localStorage
+      // apply default currency from localStorage
       const storedSymbol = localStorage.getItem("currency_symbol");
 
       if (storedSymbol) {
@@ -563,9 +562,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   >([]);
 
   const [category, setCategory] = useState<string>("All");
-  const categories = useMemo(() => {
-    return ["All", ...categoriesList.map((c) => c.name)];
-  }, [categoriesList]);
 
   const loadCategories = async () => {
     const res = await api.get(
@@ -671,12 +667,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
   }, [ordersInfo, hydrated]);
-
-  // useEffect(() => {
-  //   if (typeof window !== "undefined") {
-  //     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
-  //   }
-  // }, [ordersInfo]);
 
   // Modals / Drawers
   const [modItem, setModItem] = useState<any>(null); // item being configured
@@ -1030,7 +1020,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 rowId: Number(m.im_id),
                 name: modifier?.name ?? "",
                 priceDelta: modifier?.price ?? 0,
-                quantity: 1,
+                quantity: normalizeModifierQty(m.im_quantity, 1),
               };
             }),
           },
@@ -1242,10 +1232,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     return order.items;
   }, [order.items]);
 
-  // useEffect(() => {
-  //   localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
-  // }, [ordersInfo]);
-
   const saveOrderToDatabase = async (finalCustomerId?: number) => {
     const tableKey = currentTableId ? Number(currentTableId) : 0;
     const isTakeaway = tableKey === 0;
@@ -1374,7 +1360,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (editingOrderId) {
       setEditingOrderId(null);
     } else {
-      console.log("payload ", payload);
       const response = await api.post(
         `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/createorder`,
         payload,
@@ -1491,28 +1476,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const remainingToReturn = returnOriginal * returnRate;
 
   const displayTotal = total;
-
-  const modifierGroupsByItemId = useMemo<
-    Record<number, PopupModifierGroup[]>
-  >(() => {
-    const map: Record<number, PopupModifierGroup[]> = {};
-
-    menu.forEach((item: any) => {
-      if (!item.modifierGroups?.length) return;
-
-      map[item.id] = item.modifierGroups.map((g: any) => ({
-        id: Number(g.id),
-        name: g.name,
-        options: g.options.map((o: any) => ({
-          id: Number(o.id),
-          name: o.name,
-          price: Number(o.priceDelta ?? 0),
-        })),
-      }));
-    });
-
-    return map;
-  }, [menu]);
 
   const updateLineQty = (lineUid: string, delta: number) => {
     setOrder((prev: any) => ({
@@ -2024,7 +1987,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                   const o = g?.options.find(
                                     (oo: any) => oo.id === m.optionId,
                                   );
-                                  return `${o?.name} × ${m.qty}`;
+                                  const fallback = resolveModifierFromMaster(
+                                    modifiers,
+                                    m.optionId,
+                                  );
+
+                                  return `${o?.name ?? fallback.name} × ${m.qty}`;
                                 })
                                 .filter(Boolean)
                                 .join(", ")}
@@ -2264,7 +2232,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/30 p-4">
           {/* the modal here */}
           <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-3xl bg-white p-0 shadow-xl">
-
             <div className="flex items-center justify-between border-b px-5 py-3">
               <div className="font-bold text-gray-900">{modItem.name}</div>
               <button
@@ -3337,7 +3304,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                 return (
                                   <button
                                     disabled={posDisabled}
-                                    key={op.id}
+                                    key={op.rowId}
                                     className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition
                                 ${
                                   picked
