@@ -311,6 +311,11 @@ export default function MainLayout({
                   icon: <DollarSign size={16} />,
                 },
                 {
+                  href: "/cash/cashflow",
+                  label: "Cashflow",
+                  icon: <DollarSign size={16} />,
+                },
+                {
                   href: "/cash/bank",
                   label: t.menu.deposits,
                   icon: <PiggyBank size={16} />,

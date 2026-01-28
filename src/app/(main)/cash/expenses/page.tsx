@@ -2,13 +2,17 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import Modal from "@/components/shared/modal";
 
 /** -----------------------------
  * helpers
  * ----------------------------- */
 type UID = string | number;
 const money = (n: unknown, d = 2) =>
-  Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  Number(n || 0).toLocaleString(undefined, {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  });
 
 interface Expense {
   ref: number;
@@ -21,8 +25,6 @@ interface Expense {
   note?: string;
 }
 
-
-
 interface Category {
   id: UID;
   name: string;
@@ -32,7 +34,6 @@ const normalizeNote = (note?: string) => {
   if (!note) return "";
   return note.replace(/<\/?[^>]+(>|$)/g, "").trim();
 };
-
 
 /** -----------------------------
  * page
@@ -60,7 +61,7 @@ export default function ExpensesPOS() {
   // paging
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
-  const pageSize = 12;
+  const pageSize = 10;
 
   // modal
   const [showModal, setShowModal] = useState(false);
@@ -110,8 +111,8 @@ export default function ExpensesPOS() {
       q,
       from_date: fromDate || undefined,
       to_date: toDate || undefined,
-      category_id: categoryId || undefined,
-      payment_type: payType || undefined,
+      category_id: categoryId && categoryId !== "0" ? categoryId : undefined,
+      payment_type: payType && payType !== "0" ? payType : undefined,
       page: p,
       page_size: pageSize,
     };
@@ -122,7 +123,7 @@ export default function ExpensesPOS() {
         alert(res.data.error_message);
         return;
       }
-  
+
       setRows(res.data?.rows || []);
       setTotal(Number(res.data?.total || 0));
       setPage(Number(res.data?.page || 1));
@@ -151,6 +152,9 @@ export default function ExpensesPOS() {
     form.append("currency_id", company_currency);
     form.append("amount", fAmount || "0");
     form.append("note", fNote || "");
+    form.append("company_id", localStorage.getItem("company_id") || "");
+    form.append("store_id", localStorage.getItem("store_id") || "");
+
     if (fFile) form.append("attachment", fFile);
 
     try {
@@ -162,7 +166,8 @@ export default function ExpensesPOS() {
         return;
       }
       setShowModal(false);
-      await fetchExpenses(page);
+      const nextPage = page > 1 && rows.length === 1 ? page - 1 : page;
+      await fetchExpenses(nextPage);
     } catch {
       alert("Failed to save expense.");
     }
@@ -174,12 +179,15 @@ export default function ExpensesPOS() {
     const user_id = localStorage.getItem("user_id");
     const g_hash = localStorage.getItem("g_hash");
     try {
-      const res = await api.delete(url, { params: { user_id, g_hash, expense_id: id } });
+      const res = await api.delete(url, {
+        params: { user_id, g_hash, expense_id: id },
+      });
       if (res.data?.is_error === 1) {
         alert(res.data.error_message);
         return;
       }
-      await fetchExpenses(page);
+      const nextPage = page > 1 && rows.length === 1 ? page - 1 : page;
+      await fetchExpenses(nextPage);
     } catch {
       alert("Failed to delete.");
     }
@@ -214,21 +222,19 @@ export default function ExpensesPOS() {
     }
   };
 
-
   const fetchPaymentTypes = async () => {
-   const url = `${API_BASE}/request/api/general/listpaymenttypes`;
+    const url = `${API_BASE}/request/api/general/listpaymenttypes`;
     const user_id = localStorage.getItem("user_id");
     const g_hash = localStorage.getItem("g_hash");
 
     const res = await api.get(url, {});
-      if (res.data?.is_error === 1) {
-        alert(res.data.error_message);
-        return;
-      }
+    if (res.data?.is_error === 1) {
+      alert(res.data.error_message);
+      return;
+    }
 
-      setLstPaymentTypes(res.data?.payment_types || []);
-      
-  }
+    setLstPaymentTypes(res.data?.payment_types || []);
+  };
 
   /** -----------------------------
    * effects
@@ -239,11 +245,11 @@ export default function ExpensesPOS() {
   }, []);
 
   useEffect(() => {
+    setPage(1);
     fetchExpenses(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-
   }, [q, fromDate, toDate, categoryId, payType]);
-  
+
   /** -----------------------------
    * ui
    * ----------------------------- */
@@ -257,7 +263,9 @@ export default function ExpensesPOS() {
           </div>
           <div>
             <h1 className="text-lg font-bold leading-5">Expenses</h1>
-            <p className="text-xs text-slate-500">Retail POS • Track & Control</p>
+            <p className="text-xs text-slate-500">
+              Retail POS • Track & Control
+            </p>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -324,7 +332,7 @@ export default function ExpensesPOS() {
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
                   <option value="">All</option>
-                  {(categories || []).map((c:any) => (
+                  {(categories || []).map((c: any) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {c.category_label}
                     </option>
@@ -338,8 +346,8 @@ export default function ExpensesPOS() {
                   onChange={(e) => setPayType(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
-                   <option value="0">All</option>
-                  {(lstpaymenttypes || []).map((c:any) => (
+                  <option value="0">All</option>
+                  {(lstpaymenttypes || []).map((c: any) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {c.title}
                     </option>
@@ -394,18 +402,24 @@ export default function ExpensesPOS() {
                 </thead>
                 <tbody>
                   {rows.length ? (
-                    rows.map((r:any) => (
-                      <tr key={String(r.ref)} className="border-t border-black/5">
+                    rows.map((r: any) => (
+                      <tr
+                        key={String(r.ref)}
+                        className="border-t border-black/5"
+                      >
                         <td className="px-4 py-2">{r.ref || "-"}</td>
-                        <td className="px-4 py-2">{new Date(r.date).toLocaleDateString()}</td>
-                        <td className="px-4 py-2">{r.category}</td>
-                        <td className="px-4 py-2 capitalize">
-                          {r.payment}
+                        <td className="px-4 py-2">
+                          {new Date(r.date).toLocaleDateString()}
                         </td>
+                        <td className="px-4 py-2">{r.category}</td>
+                        <td className="px-4 py-2 capitalize">{r.payment}</td>
                         <td className="px-4 py-2 text-right font-medium">
                           {money(r.Amount)} {currency}
                         </td>
-                        <td className="px-4 py-2 max-w-[280px] truncate" title={normalizeNote(r.note)}>
+                        <td
+                          className="px-4 py-2 max-w-[280px] truncate"
+                          title={normalizeNote(r.note)}
+                        >
                           {normalizeNote(r.note)}
                         </td>
                         <td className="px-4 py-2 text-right">
@@ -426,7 +440,7 @@ export default function ExpensesPOS() {
                                 setEditing(r);
                                 setFDate(r.date.slice(0, 10));
                                 setFCategory(String(r.category_id));
-                                setFPayType(r.payment_id);
+                                setFPayType(String(r.payment_id || "0"));
                                 setFAmount(String(r.Amount));
                                 setFNote(r.note || "");
                                 setFFile(null);
@@ -447,7 +461,10 @@ export default function ExpensesPOS() {
                     ))
                   ) : (
                     <tr>
-                      <td className="px-4 py-8 text-center text-slate-500" colSpan={7}>
+                      <td
+                        className="px-4 py-8 text-center text-slate-500"
+                        colSpan={7}
+                      >
                         No expenses found.
                       </td>
                     </tr>
@@ -483,7 +500,10 @@ export default function ExpensesPOS() {
 
       {/* modal */}
       {showModal && (
-        <Modal onClose={() => setShowModal(false)} title={editing ? "Edit Expense" : "Add Expense"}>
+        <Modal
+          onClose={() => setShowModal(false)}
+          title={editing ? "Edit Expense" : "Add Expense"}
+        >
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -503,7 +523,7 @@ export default function ExpensesPOS() {
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
                   <option value="">Select…</option>
-                  {(categories || []).map((c:any) => (
+                  {(categories || []).map((c: any) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {c.category_label}
                     </option>
@@ -520,8 +540,8 @@ export default function ExpensesPOS() {
                   onChange={(e) => setFPayType(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
-                   <option value="0">All</option>
-                  {(lstpaymenttypes || []).map((c:any) => (
+                  <option value="0">All</option>
+                  {(lstpaymenttypes || []).map((c: any) => (
                     <option key={String(c.id)} value={String(c.id)}>
                       {c.title}
                     </option>
@@ -529,7 +549,9 @@ export default function ExpensesPOS() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-slate-500">Amount ({currency})</label>
+                <label className="text-xs text-slate-500">
+                  Amount ({currency})
+                </label>
                 <input
                   value={fAmount}
                   onChange={(e) => setFAmount(e.target.value)}
@@ -540,7 +562,9 @@ export default function ExpensesPOS() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-500">Receipt (optional)</label>
+              <label className="text-xs text-slate-500">
+                Receipt (optional)
+              </label>
               <input
                 type="file"
                 onChange={(e) => setFFile(e.target.files?.[0] || null)}
@@ -576,45 +600,6 @@ export default function ExpensesPOS() {
           </div>
         </Modal>
       )}
-    </div>
-  );
-}
-
-/** -----------------------------
- * Tailwind modal
- * ----------------------------- */
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  React.useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div
-        className="relative w-full sm:w-[620px] rounded-t-2xl sm:rounded-2xl bg-white p-5 shadow-lg outline-none"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="mb-3 flex items-center justify-between border-b border-black/5 pb-2">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className="rounded-lg px-2 py-1 hover:bg-slate-100" aria-label="Close">
-            ✖
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }

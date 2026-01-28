@@ -676,7 +676,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
   const [takeawayPreview, setTakeawayPreview] = useState(false);
   const [customerType, setCustomerType] = useState("takeaway");
-  const [paymentType, setPaymentType] = useState("");
+  // 2 for cash and 4 for card
+  const [paymentType, setPaymentType] = useState<number | null>(null);
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const API_URL = process.env.NEXT_PUBLIC_API_LINK;
   const [g_hash, setGHash] = useState<string | null>(null);
@@ -1354,6 +1355,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       sub_total_display: subTotalDisplay,
       total_display: totalDisplay,
 
+      payment_type: paymentType ?? 2,
       order_items: JSON.stringify(formattedItems),
     };
 
@@ -2596,10 +2598,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     <div className="flex gap-2 mt-2">
                       <button
                         disabled={posDisabled}
-                        onClick={() => setPaymentType("cash")}
+                        onClick={() => setPaymentType(2)}
                         className={`px-4 py-2 rounded-xl border text-sm font-semibold 
         ${
-          paymentType === "cash"
+          paymentType === 2
             ? "bg-orange-500 text-white border-orange-500"
             : "bg-white border-gray-300"
         }${
@@ -2614,10 +2616,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                       <button
                         disabled={posDisabled}
-                        onClick={() => setPaymentType("card")}
+                        onClick={() => setPaymentType(4)}
                         className={`px-4 py-2 rounded-xl border text-sm font-semibold 
         ${
-          paymentType === "card"
+          paymentType === 4
             ? "bg-orange-500 text-white border-orange-500"
             : "bg-white border-gray-300"
         }${
