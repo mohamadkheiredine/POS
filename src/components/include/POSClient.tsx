@@ -106,6 +106,15 @@ type LocalOrder = {
   tableIds: number[];
   items: OrderItem[];
   isHeld?: boolean;
+
+  customer?: {
+    customer_id?: number;
+    name?: string;
+    phone?: string;
+    address?: string;
+  };
+
+  checkoutDraft?: boolean;
 };
 
 type KitchenStationDB = {
@@ -285,6 +294,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   );
 
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const isTakeawayNow = (tableId: number | null) => !tableId;
 
   // true if user changed anything since last sync
   const [editDirty, setEditDirty] = useState(false);
@@ -293,6 +303,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
   const [loadOrderOpen, setLoadOrderOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const modifiersCache = useRef<Record<number, ModifierGroup[]>>({});
 
   const onLoadOrder = (payload: LoadOrderPayload) => {
@@ -424,13 +435,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     loadAllowedCurrencies();
   }, []);
-
-  const [previewPopupOpen, setPreviewPopupOpen] = useState(false);
-  const [previewTotals, setPreviewTotals] = useState({
-    subtotal: 0,
-    total: 0,
-    discount: 0,
-  });
 
   const [modifiers, setModifiers] = useState<
     { id: number; name: string; price: number; quantity: number }[]
@@ -631,42 +635,107 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   });
   const [ordersInfo, setOrdersInfo] = useState<LocalOrder[]>([]);
 
+  // this useEffect responsable for reload ordersInfo on refresh
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved: any = localStorage.getItem("orders_info");
-      try {
-        const parsed: LocalOrder[] = JSON.parse(saved || "[]");
-        setOrdersInfo(parsed);
+    const saved = localStorage.getItem("orders_info");
+    if (!saved) {
+      setHydrating(false);
+      setHydrated(true);
+      return;
+    }
 
-        const actives = parsed
-          // .filter(
-          //   (o) => o.tableIds && o.tableIds.length > 0,
-          // )
-          .flatMap((o) => o.tableIds);
+    const parsed: LocalOrder[] = JSON.parse(saved);
+    setOrdersInfo(parsed);
 
-        setActiveTables([...new Set(actives)]);
-        setCurrentOrderId(null);
-        setCurrentTableId(null);
-        setOrder({
-          id: uid(),
-          guests: 0,
-          items: [],
-          createdAt: Date.now(),
-          status: "open",
-        });
-        setHydrated(true);
-      } catch (e) {
-        console.error("Failed to parse orders_info from localStorage", e);
+    if (!parsed.length) {
+      setHydrating(false);
+      setHydrated(true);
+      return;
+    }
+
+    const lastActiveId = localStorage.getItem("last_active_order_id");
+
+    let orderToRestore: LocalOrder | null = null;
+
+    /* restore unfinished takeaway draft */
+    orderToRestore =
+      [...parsed]
+        .reverse()
+        .find(
+          (o) =>
+            o.checkoutDraft === true &&
+            o.tableIds[0] === 0 &&
+            o.items.length > 0,
+        ) ?? null;
+
+    /* restore last active order ONLY if it's takeaway */
+    if (!orderToRestore && lastActiveId) {
+      const last = parsed.find((o) => o.orderId === lastActiveId);
+      if (last && last.tableIds[0] === 0) {
+        orderToRestore = last;
       }
     }
+
+    /* restore last takeaway with items */
+    if (!orderToRestore) {
+      orderToRestore =
+        [...parsed]
+          .reverse()
+          .find((o) => o.tableIds[0] === 0 && o.items.length > 0) ?? null;
+    }
+
+    /* restore last dine-in ONLY as final fallback */
+    if (!orderToRestore) {
+      orderToRestore =
+        [...parsed]
+          .reverse()
+          .find((o) => o.tableIds[0] !== 0 && o.items.length > 0) ?? null;
+    }
+
+    if (orderToRestore) {
+      const tableId = orderToRestore.tableIds[0] ?? 0;
+
+      setCurrentOrderId(orderToRestore.orderId);
+      setCurrentTableId(tableId === 0 ? null : tableId);
+
+      setOrder({
+        id: orderToRestore.orderId,
+        guests: 0,
+        items: orderToRestore.items,
+        createdAt: Date.now(),
+        status: "open",
+      });
+
+      if (orderToRestore.customer) {
+        setSelectedCustomer({
+          customer_id: orderToRestore.customer.customer_id,
+          customer_name: orderToRestore.customer.name,
+          customer_mobile: orderToRestore.customer.phone,
+          customer_address: orderToRestore.customer.address,
+        });
+      }
+    }
+
+    setHydrating(false);
+    setHydrated(true);
   }, []);
+
+  const markTakeawayDraft = (orderId: string | null) => {
+    if (!orderId) return;
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === orderId ? { ...o, checkoutDraft: true } : o,
+      ),
+    );
+  };
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
+    if (!ordersInfo.length) return;
     localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
-  }, [ordersInfo, hydrated]);
+  }, [ordersInfo, hydrated, hydrating]);
 
   // Modals / Drawers
   const [modItem, setModItem] = useState<any>(null); // item being configured
@@ -880,12 +949,32 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (existing) {
       setCurrentOrderId(existing.orderId);
       setCurrentTableId(table.id);
+
       setOrder({
         id: existing.orderId,
         items: existing.items,
         createdAt: Date.now(),
         status: "open",
       });
+
+      if (existing.customer) {
+        setSelectedCustomer({
+          customer_id: existing.customer.customer_id,
+          customer_name: existing.customer.name,
+          customer_mobile: existing.customer.phone,
+          customer_address: existing.customer.address,
+        });
+
+        setCustomerName(existing.customer.name ?? "");
+        setCustomerPhone(existing.customer.phone ?? "");
+        setCustomerAddress(existing.customer.address ?? "");
+      } else {
+        setSelectedCustomer(null);
+        setCustomerName("");
+        setCustomerPhone("");
+        setCustomerAddress("");
+      }
+
       return;
     }
 
@@ -910,6 +999,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         isHeld: false,
       },
     ]);
+
+    setSelectedCustomer(null);
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerAddress("");
+    setTakeawayPreview(false);
 
     const store_id = localStorage.getItem("store_id");
     const company_id = localStorage.getItem("company_id");
@@ -988,18 +1083,38 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       setOrdersInfo((prev) => {
         const localOnly = prev.filter(
           (o) =>
-            o.orderId.startsWith("tmp_") ||
             o.isHeld ||
+            o.tableIds[0] === 0 ||
             !loadedOrders.some((lo) => lo.orderId === o.orderId),
         );
 
-        return upsertOrders(localOnly, loadedOrders);
+        return upsertOrders(
+          localOnly,
+          loadedOrders.map((o) => {
+            const local = prev.find((p) => p.orderId === o.orderId);
+            return local?.customer ? { ...o, customer: local.customer } : o;
+          }),
+        );
       });
     }
     if (menu.length > 0) {
       loadPendingOrders();
     }
   }, [menu]);
+
+  useEffect(() => {
+    if (!hydrated || !currentOrderId) return;
+
+    const info = ordersInfo.find((o) => o.orderId === currentOrderId);
+    if (!info?.customer) return;
+
+    setSelectedCustomer({
+      customer_id: info.customer.customer_id,
+      customer_name: info.customer.name,
+      customer_mobile: info.customer.phone,
+      customer_address: info.customer.address,
+    });
+  }, [hydrated, currentOrderId, ordersInfo]);
 
   const addItemStart = async (item: any) => {
     const rawModifiers = await fetchModifiersPerItem(item.id);
@@ -1074,9 +1189,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         orderId,
         tableIds: [0],
         items: [],
+        checkoutDraft: true,
       };
 
       setOrdersInfo((prev) => [...prev, newOrder]);
+      // setOrdersInfo((prev) =>
+      //   prev.map((o) =>
+      //     o.orderId === orderId ? { ...o, checkoutDraft: true } : o,
+      //   ),
+      // );
+      markTakeawayDraft(orderId);
 
       setOrder({
         id: orderId,
@@ -1324,8 +1446,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       await syncEditedOrderIfNeeded(editingOrderId);
     }
 
+    const dineInOrderId =
+      currentOrderId && !String(currentOrderId).startsWith("tmp_")
+        ? Number(currentOrderId)
+        : null;
+
     const payload = {
-      order_id: orderType === "dine_in" ? Number(currentOrderId) : null,
+      order_id: orderType === "dine_in" ? dineInOrderId : null,
       g_hash: localStorage.getItem("g_hash"),
       warehouse_id: localStorage.getItem("warehouse_id"),
       user_id: localStorage.getItem("user_id"),
@@ -1376,9 +1503,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       }
     }
 
-    const remaining = ordersInfo.filter((o) => o.orderId !== orderData.orderId);
-
-    setOrdersInfo(remaining);
+    if (!editingOrderId) {
+      setOrdersInfo((prev) =>
+        prev.filter((o) => o.orderId !== orderData.orderId),
+      );
+    }
 
     setOrder({
       id: uid(),
@@ -1388,6 +1517,15 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       status: "open",
     });
 
+    // clear takeaway draft flag after successful save
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === orderData.orderId ? { ...o, checkoutDraft: false } : o,
+      ),
+    );
+
+    setCurrentOrderId(null);
+    localStorage.removeItem("last_active_order_id");
     setCurrentTableId(null);
     setSelectedCustomer(null);
     setCustomerName("");
@@ -1681,6 +1819,38 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setOriginalItems(updatedItems);
     setEditDirty(false);
   }
+
+  const persistCustomerToOrder = (customer: {
+    customer_id?: number;
+    name?: string;
+    phone?: string;
+    address?: string;
+  }) => {
+    if (!currentOrderId) return;
+
+    setOrdersInfo((prev) =>
+      prev.map((o) =>
+        o.orderId === currentOrderId
+          ? {
+              ...o,
+              customer: {
+                customer_id: customer.customer_id,
+                name: customer.name,
+                phone: customer.phone,
+                address: customer.address,
+              },
+            }
+          : o,
+      ),
+    );
+  };
+
+  useEffect(() => {
+    if (!currentOrderId) return;
+    if (hydrating) return;
+
+    localStorage.setItem("last_active_order_id", currentOrderId);
+  }, [currentOrderId, hydrating]);
 
   /* -------------------- render -------------------- */
   return (
@@ -2500,7 +2670,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             {/* HEADER */}
             <div className="px-5 py-4 border-b flex justify-between items-center">
               <h2 className="text-lg font-bold text-gray-900">
-                {t.POS.takeawayCustomer}
+                {isTakeawayNow(currentTableId)
+                  ? t.POS.takeawayCustomer
+                  : "Dine In Customer"}
               </h2>
               <button
                 disabled={posDisabled}
@@ -2519,7 +2691,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
               {takeawayPreview && (
                 <div className="mt-6 rounded-2xl border border-orange-300 bg-orange-50 p-4">
                   <h3 className="text-lg font-bold mb-3">
-                    Takeaway Order Preview
+                    {isTakeawayNow(currentTableId)
+                      ? "Takeaway Order Preview"
+                      : "Dine-In Order Preview"}
                   </h3>
 
                   {/* Items */}
@@ -2540,19 +2714,32 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                           <div className="text-xs text-gray-600 ml-2">
                             {li.modifiers
                               .map((m: any) => {
+                                // try from item modifierGroups (best)
                                 const item = menu.find(
                                   (x) => x.id === li.itemId,
                                 );
                                 const g = item?.modifierGroups?.find(
                                   (gg: any) => gg.id === m.groupId,
                                 );
-                                const o = g?.options.find(
+                                const o = g?.options?.find(
                                   (oo: any) => oo.id === m.optionId,
                                 );
-                                return `${o?.name} (${money(
-                                  o?.priceDelta || 0,
-                                )})`;
+
+                                // fallback from global modifiers list
+                                const fallback = resolveModifierFromMaster(
+                                  modifiers,
+                                  Number(m.optionId),
+                                );
+
+                                const name = o?.name ?? fallback.name;
+                                const priceDelta = Number(
+                                  o?.priceDelta ?? fallback.priceDelta ?? 0,
+                                );
+                                const qty = Number(m.qty ?? 1);
+
+                                return `${name} × ${qty} (${money(priceDelta)})`;
                               })
+                              .filter(Boolean)
                               .join(", ")}
                           </div>
                         )}
@@ -2691,6 +2878,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         key={c.customer_id}
                         onClick={() => {
                           setSelectedCustomer(c);
+                          persistCustomerToOrder({
+                            customer_id: c.customer_id,
+                            name: c.customer_name,
+                            phone: c.customer_mobile,
+                            address: c.customer_address,
+                          });
                           setShowNewCustomer(false);
 
                           setCustomerName("");
@@ -2814,12 +3007,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         : "hover:bg-emerald-700"
     }`}
                 onClick={async () => {
-                  let finalCustomerId = null;
+                  let finalCustomerId: number | null = null;
 
                   if (selectedCustomer && !showNewCustomer) {
-                    finalCustomerId = selectedCustomer.customer_id;
+                    finalCustomerId = Number(selectedCustomer.customer_id);
                   } else if (showNewCustomer) {
-                    // Require name + phone
                     if (!customerName || !customerPhone) {
                       return alert("Name and phone are required!");
                     }
@@ -2827,13 +3019,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     const payload = {
                       g_hash: localStorage.getItem("g_hash"),
                       user_id: localStorage.getItem("user_id"),
-
                       customer_id: 0,
                       ic_customer_name: customerName,
                       ic_customer_address: customerAddress,
                       ic_customer_phone: customerPhone,
                       ic_customer_mobile: customerPhone,
-
                       ic_customer_email: "",
                       ic_customer_website: "",
                       ic_hobbies: "",
@@ -2853,8 +3043,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                       return alert(res.data.error_message);
                     }
 
-                    // Set newly created customer
-                    finalCustomerId = res.data.customer_id;
+                    finalCustomerId = Number(res.data.customer_id);
 
                     setSelectedCustomer({
                       customer_id: finalCustomerId,
@@ -2864,128 +3053,43 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     });
                   }
 
-                  setCustomerDrawerOpen(false);
+                  // persist customer ONLY if takeaway
+                  persistCustomerToOrder({
+                    customer_id: finalCustomerId ?? undefined,
+                    name: customerName,
+                    phone: customerPhone,
+                    address: customerAddress,
+                  });
 
-                  // Pass finalCustomerId to your order-saving function
-                  await saveOrderToDatabase(finalCustomerId);
+                  // If takeaway: mark checkoutDraft + customer snapshot for refresh restore
+                  if (isTakeawayNow(currentTableId)) {
+                    setOrdersInfo((prev) =>
+                      prev.map((o) =>
+                        o.orderId === currentOrderId
+                          ? {
+                              ...o,
+                              checkoutDraft: true,
+                              customer: {
+                                customer_id: finalCustomerId ?? undefined,
+                                name: customerName,
+                                phone: customerPhone,
+                                address: customerAddress,
+                              },
+                            }
+                          : o,
+                      ),
+                    );
+                  }
+
+                  // SAVE TO DATABASE
+                  await saveOrderToDatabase(finalCustomerId ?? undefined);
+
+                  // Close UI
+                  setCustomerDrawerOpen(false);
+                  setTakeawayPreview(false);
                 }}
               >
                 {t.POS.payClose}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {previewPopupOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white overflow-hidden shadow-xl">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <h2 className="text-lg font-bold">Invoice & Payment</h2>
-              <button
-                disabled={posDisabled}
-                onClick={() => setPreviewPopupOpen(false)}
-                className={`p-1 rounded-lg hover:bg-gray-100${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="p-6 space-y-4">
-              {/* Product List */}
-              <div className="rounded-xl border p-4">
-                <div className="font-semibold text-sm text-gray-700 mb-2">
-                  {t.POS.product}
-                </div>
-                {order.items.map((li: any) => (
-                  <div key={li.uid} className="space-y-1 border-b pb-2">
-                    <div className="flex justify-between">
-                      <span>
-                        {li.name} × {li.qty}
-                      </span>
-                      <span>
-                        {money((li.basePrice + li.priceExtra) * li.qty)}
-                      </span>
-                    </div>
-
-                    {/* modifiers */}
-                    {li.modifiers.length > 0 && (
-                      <div className="text-xs text-gray-600 ml-2">
-                        {li.modifiers
-                          .map((m: any) => {
-                            const item = menu.find((x) => x.id === li.itemId);
-                            const g = item?.modifierGroups?.find(
-                              (gg: any) => gg.id === m.groupId,
-                            );
-                            const o = g?.options.find(
-                              (oo: any) => oo.id === m.optionId,
-                            );
-                            return `${o?.name} (${money(o?.priceDelta || 0)})`;
-                          })
-                          .join(", ")}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Totals */}
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">{t.POS.subtotal}</span>
-                  <span className="font-semibold">
-                    {money(previewTotals.subtotal)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">{t.POS.discount} %</span>
-                  <span className="font-semibold">
-                    {previewTotals.discount}
-                  </span>
-                </div>
-                <div className="flex justify-between text-lg">
-                  <span className="font-bold">
-                    {t.POS.total} ({CurrencySymbol})
-                  </span>
-                  <span className="font-extrabold">
-                    {money(previewTotals.total)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="border-t px-6 py-4 flex justify-end gap-2">
-              <button
-                disabled={posDisabled}
-                onClick={() => setPreviewPopupOpen(false)}
-                className={`rounded-xl border px-4 py-2 font-semibold${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-              >
-                {t.POS.cancel}
-              </button>
-              <button
-                disabled={posDisabled}
-                onClick={async () => {
-                  setPreviewPopupOpen(false);
-                  await saveOrderToDatabase();
-                }}
-                className={`rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 text-white px-5 py-2 font-semibold shadow-lg${
-                  posDisabled
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none opacity-60"
-                    : "hover:bg-emerald-700"
-                }`}
-              >
-                Save Order
               </button>
             </div>
           </div>

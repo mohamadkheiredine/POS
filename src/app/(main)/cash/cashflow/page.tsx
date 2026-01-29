@@ -22,12 +22,24 @@ interface CashRow {
   user?: string;
 }
 
+interface Account {
+  aa_id: number;
+  aa_account: string;
+  aa_account_label: string;
+}
+
+interface Currency {
+  currency_id: number;
+  currency_code: string;
+  currency_name: string;
+}
+
 /* ------------------ page ------------------ */
 export default function CashflowPOS() {
   const API_BASE = process.env.NEXT_PUBLIC_API_LINK;
   const [currency, setCurrency] = useState<string>("");
   useEffect(() => {
-    setCurrency(localStorage.getItem("currency_symbol") || 'USD');
+    setCurrency(localStorage.getItem("currency_symbol") || "USD");
   }, []);
 
   const router = useRouter();
@@ -42,6 +54,9 @@ export default function CashflowPOS() {
   const [rows, setRows] = useState<CashRow[]>([]);
   const [sumIn, setSumIn] = useState(0);
   const [sumOut, setSumOut] = useState(0);
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
 
   // paging
   const [page, setPage] = useState(1);
@@ -131,11 +146,40 @@ export default function CashflowPOS() {
 
   const net = sumIn - sumOut;
 
-  const currencyOptions = [
-    { code: "USD", label: "USD ($)" },
-    { code: "EUR", label: "EUR (€)" },
-    { code: "LBP", label: "LBP (ل.ل)" },
-  ];
+  const fetchAccounts = async () => {
+    const user_id = localStorage.getItem("user_id");
+    const g_hash = localStorage.getItem("g_hash");
+
+    const res = await api.get(`${API_BASE}/request/api/cash/getaccounts`, {
+      params: { user_id, g_hash },
+    });
+
+    if (res.data?.is_error === 1) {
+      alert(res.data.error_message);
+      return;
+    }
+
+    setAccounts(res.data.lst_accounts || []);
+  };
+
+  const fetchCurrencies = async () => {
+    const user_id = localStorage.getItem("user_id");
+    const g_hash = localStorage.getItem("g_hash");
+
+    const res = await api.post(`${API_BASE}/request/api/getlistcurrency`, {
+      user_id,
+      g_hash,
+    });
+
+    const list = res.data?.currencies || {};
+
+    setCurrencies(Object.values(list));
+  };
+
+  useEffect(() => {
+    fetchAccounts();
+    fetchCurrencies();
+  }, []);
 
   /* ------------------ ui ------------------ */
   return (
@@ -384,9 +428,11 @@ export default function CashflowPOS() {
                 className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
               >
                 <option value="">Select source account</option>
-                <option value="cash">Cash</option>
-                <option value="bank">Bank</option>
-                <option value="wallet">Wallet</option>
+                {accounts.map((acc) => (
+                  <option key={acc.aa_id} value={acc.aa_id}>
+                    {acc.aa_account} - {acc.aa_account_label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -396,13 +442,16 @@ export default function CashflowPOS() {
               </label>
               <select
                 required
-                value={destinationAccount}
-                onChange={(e) => setDestinationAccount(e.target.value)}
+                value={sourceAccount}
+                onChange={(e) => setSourceAccount(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
               >
                 <option value="">Select destination account</option>
-                <option value="main_cash">Main Cash</option>
-                <option value="safe">Safe</option>
+                {accounts.map((acc) => (
+                  <option key={acc.aa_id} value={acc.aa_id}>
+                    {acc.aa_account} - {acc.aa_account_label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -415,9 +464,10 @@ export default function CashflowPOS() {
                   onChange={(e) => setCurrency(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
-                  {currencyOptions.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.label}
+                  <option value="">Select currency</option>
+                  {currencies.map((c) => (
+                    <option key={c.currency_id} value={c.currency_id}>
+                      {c.currency_code} - {c.currency_name}
                     </option>
                   ))}
                 </select>
@@ -479,13 +529,17 @@ export default function CashflowPOS() {
             <div>
               <label className="text-xs text-slate-500">Source Account</label>
               <select
+                required
                 value={sourceAccount}
                 onChange={(e) => setSourceAccount(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
               >
                 <option value="">Select source account</option>
-                <option value="main_cash">Main Cash</option>
-                <option value="safe">Safe</option>
+                {accounts.map((acc) => (
+                  <option key={acc.aa_id} value={acc.aa_id}>
+                    {acc.aa_account} - {acc.aa_account_label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -494,13 +548,17 @@ export default function CashflowPOS() {
                 Destination Account
               </label>
               <select
-                value={destinationAccount}
-                onChange={(e) => setDestinationAccount(e.target.value)}
+                required
+                value={sourceAccount}
+                onChange={(e) => setSourceAccount(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
               >
                 <option value="">Select destination account</option>
-                <option value="expense">Expense</option>
-                <option value="supplier">Supplier</option>
+                {accounts.map((acc) => (
+                  <option key={acc.aa_id} value={acc.aa_id}>
+                    {acc.aa_account} - {acc.aa_account_label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -513,9 +571,10 @@ export default function CashflowPOS() {
                   onChange={(e) => setCurrency(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
                 >
-                  {currencyOptions.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.label}
+                  <option value="">Select currency</option>
+                  {currencies.map((c) => (
+                    <option key={c.currency_id} value={c.currency_id}>
+                      {c.currency_code} - {c.currency_name}
                     </option>
                   ))}
                 </select>
