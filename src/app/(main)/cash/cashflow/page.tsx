@@ -3,6 +3,7 @@
 import { api } from "@/lib/api";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import CashMovementModal from "@/components/shared/cash-movements-modal";
 
 /* ------------------ helpers ------------------ */
 type UID = string | number;
@@ -37,9 +38,21 @@ interface Currency {
 /* ------------------ page ------------------ */
 export default function CashflowPOS() {
   const API_BASE = process.env.NEXT_PUBLIC_API_LINK;
-  const [currency, setCurrency] = useState<string>("");
+
+  const [currencySymbol, setCurrencySymbol] = useState<string>("USD");
+
+  const [companyId, setCompanyId] = useState<number>(0);
+  const [storeId, setStoreId] = useState<number>(0);
+
   useEffect(() => {
-    setCurrency(localStorage.getItem("currency_symbol") || "USD");
+    if (typeof window === "undefined") return;
+
+    setCurrencySymbol(localStorage.getItem("currency_symbol") || "USD");
+
+    const compId = Number(localStorage.getItem("company_id") || 1);
+    const storId = Number(localStorage.getItem("store_id") || 1);
+    setCompanyId(Number.isFinite(compId) && compId > 0 ? compId : 0);
+    setStoreId(Number.isFinite(storId) && storId > 0 ? storId : 0);
   }, []);
 
   const router = useRouter();
@@ -66,12 +79,6 @@ export default function CashflowPOS() {
   // modals
   const [showCredit, setShowCredit] = useState(false);
   const [showDebit, setShowDebit] = useState(false);
-
-  // form fields (shared)
-  const [sourceAccount, setSourceAccount] = useState("");
-  const [destinationAccount, setDestinationAccount] = useState("");
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
 
   const fetchCashflow = async (p = 1) => {
     const url = `${API_BASE}/request/api/cash/list`;
@@ -181,6 +188,36 @@ export default function CashflowPOS() {
     fetchCurrencies();
   }, []);
 
+  const saveCashMovement = async (payload: {
+    code: "in" | "out";
+    source_account: number;
+    destination_account: number;
+    amount: number;
+    currency_id: number;
+    description: string;
+    company_id: number;
+    store_id: number;
+  }) => {
+    const user_id = localStorage.getItem("user_id");
+    const g_hash = localStorage.getItem("g_hash");
+
+    const res = await api.post(
+      `${API_BASE}/request/api/cash/savecashmovements`,
+      {
+        user_id,
+        g_hash,
+        ...payload,
+      },
+    );
+
+    if (res.data?.is_error === 1) {
+      alert(res.data.error_message);
+      return;
+    }
+
+    fetchCashflow(1);
+  };
+
   /* ------------------ ui ------------------ */
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-fuchsia-50">
@@ -216,17 +253,17 @@ export default function CashflowPOS() {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <KPI
               title="Cash In"
-              value={`${money(sumIn)} ${currency}`}
+              value={`${money(sumIn)} ${currencySymbol}`}
               tone="emerald"
             />
             <KPI
               title="Cash Out"
-              value={`${money(sumOut)} ${currency}`}
+              value={`${money(sumOut)} ${currencySymbol}`}
               tone="rose"
             />
             <KPI
               title="Net"
-              value={`${money(net)} ${currency}`}
+              value={`${money(net)} ${currencySymbol}`}
               tone={net >= 0 ? "sky" : "amber"}
             />
           </div>
@@ -358,7 +395,7 @@ export default function CashflowPOS() {
                           {r.note || ""}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          {money(r.amount)} {currency}
+                          {money(r.amount)} {currencySymbol}
                         </td>
                       </tr>
                     ))
@@ -411,213 +448,29 @@ export default function CashflowPOS() {
 
       {/* Add entry modal */}
       {showCredit && (
-        <Modal title="Cash In (Credit)" onClose={() => setShowCredit(false)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setShowCredit(false);
-            }}
-            className="space-y-4"
-          >
-            <div>
-              <label className="text-xs text-slate-500">Source Account</label>
-              <select
-                required
-                value={sourceAccount}
-                onChange={(e) => setSourceAccount(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              >
-                <option value="">Select source account</option>
-                {accounts.map((acc) => (
-                  <option key={acc.aa_id} value={acc.aa_id}>
-                    {acc.aa_account} - {acc.aa_account_label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">
-                Destination Account
-              </label>
-              <select
-                required
-                value={sourceAccount}
-                onChange={(e) => setSourceAccount(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              >
-                <option value="">Select destination account</option>
-                {accounts.map((acc) => (
-                  <option key={acc.aa_id} value={acc.aa_id}>
-                    {acc.aa_account} - {acc.aa_account_label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-500">Currency</label>
-                <select
-                  required
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-                >
-                  <option value="">Select currency</option>
-                  {currencies.map((c) => (
-                    <option key={c.currency_id} value={c.currency_id}>
-                      {c.currency_code} - {c.currency_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="col-span-2">
-                <label className="text-xs text-slate-500">Amount</label>
-                <input
-                  required
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-right"
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowCredit(false)}
-                className="rounded-xl border px-4 py-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700"
-              >
-                Save Credit
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <CashMovementModal
+          title="Cash In (Credit)"
+          code="in"
+          accounts={accounts}
+          currencies={currencies}
+          companyId={companyId}
+          storeId={storeId}
+          onClose={() => setShowCredit(false)}
+          onSave={saveCashMovement}
+        />
       )}
 
       {showDebit && (
-        <Modal title="Cash Out (Debit)" onClose={() => setShowDebit(false)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setShowDebit(false);
-            }}
-            className="space-y-4"
-          >
-            <div>
-              <label className="text-xs text-slate-500">Source Account</label>
-              <select
-                required
-                value={sourceAccount}
-                onChange={(e) => setSourceAccount(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              >
-                <option value="">Select source account</option>
-                {accounts.map((acc) => (
-                  <option key={acc.aa_id} value={acc.aa_id}>
-                    {acc.aa_account} - {acc.aa_account_label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">
-                Destination Account
-              </label>
-              <select
-                required
-                value={sourceAccount}
-                onChange={(e) => setSourceAccount(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              >
-                <option value="">Select destination account</option>
-                {accounts.map((acc) => (
-                  <option key={acc.aa_id} value={acc.aa_id}>
-                    {acc.aa_account} - {acc.aa_account_label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-500">Currency</label>
-                <select
-                  required
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-                >
-                  <option value="">Select currency</option>
-                  {currencies.map((c) => (
-                    <option key={c.currency_id} value={c.currency_id}>
-                      {c.currency_code} - {c.currency_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="col-span-2">
-                <label className="text-xs text-slate-500">Amount</label>
-                <input
-                  required
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-right"
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-slate-500">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowDebit(false)}
-                className="rounded-xl border px-4 py-2"
-              >
-                Cancel
-              </button>
-              <button className="rounded-xl bg-rose-600 px-4 py-2 text-white hover:bg-rose-700">
-                Save Debit
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <CashMovementModal
+          title="Cash Out (Debit)"
+          code="out"
+          accounts={accounts}
+          currencies={currencies}
+          companyId={companyId}
+          storeId={storeId}
+          onClose={() => setShowDebit(false)}
+          onSave={saveCashMovement}
+        />
       )}
     </div>
   );
@@ -647,47 +500,6 @@ function KPI({
         className={`mt-1 inline-flex rounded-xl bg-gradient-to-r ${tones[tone]} px-3 py-1 text-white`}
       >
         <span className="text-lg font-bold">{value}</span>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------ tailwind modal ------------------ */
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  React.useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div
-        className="relative w-full sm:w-[620px] rounded-t-2xl sm:rounded-2xl bg-white p-5 shadow-lg outline-none"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="mb-3 flex items-center justify-between border-b border-black/5 pb-2">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button
-            onClick={onClose}
-            className="rounded-lg px-2 py-1 hover:bg-slate-100"
-            aria-label="Close"
-          >
-            ✖
-          </button>
-        </div>
-        {children}
       </div>
     </div>
   );

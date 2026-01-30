@@ -26,6 +26,12 @@ export type LoadOrderPayload = {
   orderCode: string;
   tableIds: number[];
   items: OrderItemUI[];
+  customer?: {
+    customer_id: number;
+    name: string;
+    phone?: string;
+    address?: string;
+  };
 };
 
 function normalizeTableIds(raw: any): number[] {
@@ -105,13 +111,15 @@ export default function LoadOrderPopup({
           quantity: Number(m.quantity ?? 1),
         })),
       }));
+      const customer = order.customer ?? undefined;
+
 
       onLoadOrder({
         orderId: Number(order.order_id),
         orderCode: order.order_code,
         tableIds: normalizeTableIds(order.table_ids),
-
         items,
+        customer,
       });
 
       setOrderCode("");

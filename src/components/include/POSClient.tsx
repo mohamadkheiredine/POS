@@ -191,6 +191,12 @@ export type LoadOrderPayload = {
   orderId: number;
   tableIds: number[];
   items: any[];
+  customer?: {
+    customer_id: number;
+    name: string;
+    phone?: string;
+    address?: string;
+  };
 };
 
 function readHeldSnapshot(): HeldSnapshot | null {
@@ -304,10 +310,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [loadOrderOpen, setLoadOrderOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [hydrating, setHydrating] = useState(true);
-  const modifiersCache = useRef<Record<number, ModifierGroup[]>>({});
 
   const onLoadOrder = (payload: LoadOrderPayload) => {
     const { orderId, tableIds, items } = payload;
+    const customer = payload.customer;
+
     setEditingOrderId(orderId);
 
     const snap =
@@ -321,7 +328,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const oid = String(orderId);
 
     const mappedItems: OrderItem[] = items.map((it) => {
-      const itemId = Number(it.item_id);
+      const itemId = Number(it.itemId);
 
       const menuItem = menu.find((m) => m.id === itemId);
 
@@ -374,6 +381,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       createdAt: Date.now(),
       status: "open",
     });
+    console.log("customer loaded is ", customer);
+
+    applyCustomerToUI(
+      customer
+        ? {
+            customer_id: customer.customer_id,
+            name: customer.name,
+            phone: customer.phone,
+            address: customer.address,
+          }
+        : null,
+    );
+
+    if (customer) {
+      setOrdersInfo((prev) =>
+        prev.map((o) =>
+          o.orderId === oid
+            ? {
+                ...o,
+                customer: {
+                  customer_id: customer.customer_id,
+                  name: customer.name,
+                  phone: customer.phone,
+                  address: customer.address,
+                },
+              }
+            : o,
+        ),
+      );
+    }
 
     setLoadOrderOpen(false);
   };
@@ -707,12 +744,14 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       });
 
       if (orderToRestore.customer) {
-        setSelectedCustomer({
+        applyCustomerToUI({
           customer_id: orderToRestore.customer.customer_id,
-          customer_name: orderToRestore.customer.name,
-          customer_mobile: orderToRestore.customer.phone,
-          customer_address: orderToRestore.customer.address,
+          name: orderToRestore.customer.name,
+          phone: orderToRestore.customer.phone,
+          address: orderToRestore.customer.address,
         });
+      } else {
+        applyCustomerToUI(null);
       }
     }
 
@@ -754,6 +793,39 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
   const [heldSnapshot, setHeldSnapshot] = useState<HeldSnapshot | null>(null);
   const [lastHeldOrderId, setLastHeldOrderId] = useState<string | null>(null);
+
+  const isEditing = typeof editingOrderId === "number" && editingOrderId > 0;
+
+  const applyCustomerToUI = (
+    c:
+      | {
+          customer_id?: number;
+          name?: string;
+          phone?: string;
+          address?: string;
+        }
+      | null
+      | undefined,
+  ) => {
+    if (!c) {
+      setSelectedCustomer(null);
+      setCustomerName("");
+      setCustomerPhone("");
+      setCustomerAddress("");
+      return;
+    }
+
+    setSelectedCustomer({
+      customer_id: c.customer_id,
+      customer_name: c.name ?? "",
+      customer_mobile: c.phone ?? "",
+      customer_address: c.address ?? "",
+    });
+
+    setCustomerName(c.name ?? "");
+    setCustomerPhone(c.phone ?? "");
+    setCustomerAddress(c.address ?? "");
+  };
 
   useEffect(() => {
     const snap = readHeldSnapshot();
@@ -1106,13 +1178,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (!hydrated || !currentOrderId) return;
 
     const info = ordersInfo.find((o) => o.orderId === currentOrderId);
-    if (!info?.customer) return;
+    if (!info?.customer) {
+      applyCustomerToUI(null);
+      return;
+    }
 
-    setSelectedCustomer({
+    applyCustomerToUI({
       customer_id: info.customer.customer_id,
-      customer_name: info.customer.name,
-      customer_mobile: info.customer.phone,
-      customer_address: info.customer.address,
+      name: info.customer.name,
+      phone: info.customer.phone,
+      address: info.customer.address,
     });
   }, [hydrated, currentOrderId, ordersInfo]);
 
@@ -1356,6 +1431,36 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, [order.items]);
 
   const saveOrderToDatabase = async (finalCustomerId?: number) => {
+    // sync edited order
+    if (editingOrderId && editDirty) {
+      await syncEditedOrderIfNeeded(editingOrderId);
+      return;
+    }
+
+    if (editingOrderId && !editDirty) {
+      setOrdersInfo((prev) => prev.filter((o) => o.orderId !== currentOrderId));
+
+      setEditingOrderId(null);
+      setEditDirty(false);
+
+      //reset ui order
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+
+      //clear selection
+      setCurrentOrderId(null);
+      setCurrentTableId(null);
+
+      //cleanup localStorage
+      localStorage.removeItem("last_active_order_id");
+      return;
+    }
+
     const tableKey = currentTableId ? Number(currentTableId) : 0;
     const isTakeaway = tableKey === 0;
 
@@ -1394,7 +1499,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       const unitBase = li.basePrice + li.priceExtra;
 
       return {
-        item_id: Number(li.itemId),
+        item_id: Number(li.itemId ?? li.id),
         quantity: li.qty,
         unit_price: unitBase,
 
@@ -1426,14 +1531,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (customerPhone?.trim()) delPhone = customerPhone.trim();
     if (customerAddress?.trim()) delAddress = customerAddress.trim();
 
-    const firstItem = orderData.items[0];
-    const currencyId = menu.find((m) => m.id === firstItem.itemId)?.cc_id;
-
-    if (!currencyId) {
-      alert("Cannot detect currency for this order.");
-      return;
-    }
-
     const subTotalBase = subtotalOriginal;
     const taxBase = subTotalBase * 0.11;
     const totalBase = subTotalBase + taxBase;
@@ -1442,9 +1539,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const totalDisplay = convertPrice(totalBase);
 
     const displayCurrencyId = selectedCur?.currencyId;
-    if (editingOrderId) {
-      await syncEditedOrderIfNeeded(editingOrderId);
-    }
 
     const dineInOrderId =
       currentOrderId && !String(currentOrderId).startsWith("tmp_")
@@ -1486,21 +1580,18 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       order_items: JSON.stringify(formattedItems),
     };
 
-    if (editingOrderId) {
-      setEditingOrderId(null);
-    } else {
-      const response = await api.post(
-        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/createorder`,
-        payload,
-      );
-      if (response.data?.is_error === 1) {
-        alert(response.data.error_msg || "Create order failed");
-        return;
-      }
+    const response = await api.post(
+      `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/saveorder`,
+      payload,
+    );
 
-      if (response.data?.receipt_html) {
-        setReceiptHTML(response.data.receipt_html);
-      }
+    if (response.data?.is_error === 1) {
+      alert(response.data.error_msg || "Save order failed");
+      return;
+    }
+
+    if (response.data?.receipt_html) {
+      setReceiptHTML(response.data.receipt_html);
     }
 
     if (!editingOrderId) {
@@ -1508,6 +1599,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         prev.filter((o) => o.orderId !== orderData.orderId),
       );
     }
+
+    setEditingOrderId(null);
+    setEditDirty(false);
 
     setOrder({
       id: uid(),
@@ -1518,11 +1612,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     });
 
     // clear takeaway draft flag after successful save
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === orderData.orderId ? { ...o, checkoutDraft: false } : o,
-      ),
-    );
+    // see if customer logic will break if we remove this
+    // setOrdersInfo((prev) =>
+    //   prev.map((o) =>
+    //     o.orderId === orderData.orderId ? { ...o, checkoutDraft: false } : o,
+    //   ),
+    // );
 
     setCurrentOrderId(null);
     localStorage.removeItem("last_active_order_id");
@@ -1796,7 +1891,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const updatedItems = orderItemsToUIItems(order.items, menu);
 
-    await api.post(`${process.env.NEXT_PUBLIC_API_LINK}/api/orders/editorder`, {
+    await api.post(`${process.env.NEXT_PUBLIC_API_LINK}/api/orders/saveorder`, {
       g_hash: localStorage.getItem("g_hash"),
       user_id: localStorage.getItem("user_id"),
       store_id: localStorage.getItem("store_id"),
@@ -1814,10 +1909,37 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           modifiers: it.modifiers ?? [],
         })),
       ),
+
+      customer_id: selectedCustomer?.customer_id ?? null,
+      delcustomername: customerName ?? "",
+      delcustomerphone: customerPhone ?? "",
+      delcustomeraddress: customerAddress ?? "",
+      customer_type: order.orderType ?? null,
     });
 
     setOriginalItems(updatedItems);
     setEditDirty(false);
+
+    setOrdersInfo((prev) => prev.filter((o) => o.orderId !== currentOrderId));
+
+    setEditingOrderId(null);
+    setEditDirty(false);
+
+    //reset ui order
+    setOrder({
+      id: uid(),
+      guests: 0,
+      items: [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    //clear selection
+    setCurrentOrderId(null);
+    setCurrentTableId(null);
+
+    //cleanup localStorage
+    localStorage.removeItem("last_active_order_id");
   }
 
   const persistCustomerToOrder = (customer: {
@@ -1827,22 +1949,15 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     address?: string;
   }) => {
     if (!currentOrderId) return;
+    applyCustomerToUI(customer);
 
     setOrdersInfo((prev) =>
       prev.map((o) =>
-        o.orderId === currentOrderId
-          ? {
-              ...o,
-              customer: {
-                customer_id: customer.customer_id,
-                name: customer.name,
-                phone: customer.phone,
-                address: customer.address,
-              },
-            }
-          : o,
+        o.orderId === currentOrderId ? { ...o, customer: { ...customer } } : o,
       ),
     );
+
+    if (editingOrderId) setEditDirty(true);
   };
 
   useEffect(() => {
@@ -2688,7 +2803,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             </div>
 
             <div className="p-5 space-y-4">
-              {takeawayPreview && (
+              {(takeawayPreview || selectedCustomer) && (
                 <div className="mt-6 rounded-2xl border border-orange-300 bg-orange-50 p-4">
                   <h3 className="text-lg font-bold mb-3">
                     {isTakeawayNow(currentTableId)
@@ -2886,9 +3001,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                           });
                           setShowNewCustomer(false);
 
-                          setCustomerName("");
-                          setCustomerPhone("");
-                          setCustomerAddress("");
+                          // setCustomerName("");
+                          // setCustomerPhone("");
+                          // setCustomerAddress("");
                         }}
                         className={`w-full text-left px-4 py-2 rounded-xl border transition 
             ${
