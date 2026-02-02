@@ -3547,11 +3547,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                                       {op.name}
                                     </span>
                                     <span className="text-gray-700">
-                                      {op.priceDelta
-                                        ? op.priceDelta > 0
-                                          ? `+${money(op.priceDelta)}`
-                                          : `${money(op.priceDelta)}`
-                                        : ""}
+                                      Qty:{" "}
+                                      {lineInGroup.find(
+                                        (s: any) => s.optionId === op.id,
+                                      )?.qty ??
+                                        op.quantity ??
+                                        1}
                                     </span>
                                   </button>
                                 );
