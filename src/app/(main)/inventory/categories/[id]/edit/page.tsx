@@ -4,6 +4,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { ArrowLeft, Save } from "lucide-react";
+import { useAppSelector } from "@/store/hooks";
 
 type FormErrors = {
   pc_category?: string;
@@ -22,14 +23,14 @@ export default function EditCategoryPage() {
   const [loadingPage, setLoadingPage] = useState(true);
   const [errors, setErrors] = useState<FormErrors>({});
 
-  /* =============================
-     FETCH CATEGORY INFO
-  ============================= */
+  const auth = useAppSelector((s) => s.auth.loginData);
+
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+
+    // FETCH CATEGORY INFO
   useEffect(() => {
     const fetchCategory = async () => {
-      const user_id = Number(localStorage.getItem("user_id"));
-      const g_hash = localStorage.getItem("g_hash");
-
       if (!user_id || !g_hash) {
         setErrors({
           general: "Authentication data missing. Please login again.",
@@ -91,9 +92,6 @@ export default function EditCategoryPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
-
-    const user_id = Number(localStorage.getItem("user_id"));
-    const g_hash = localStorage.getItem("g_hash");
 
     if (!user_id || !g_hash) {
       setErrors({

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
+import { useAppSelector } from "@/store/hooks";
 
 type BalanceRow = {
   id: string;
@@ -21,6 +22,11 @@ export default function CloseShift() {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const auth = useAppSelector((s) => s.auth.loginData);
+
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
 
   const router = useRouter();
 
@@ -58,9 +64,6 @@ export default function CloseShift() {
         return;
       }
     }
-
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
 
     if (!user_id || !g_hash) {
       alert("Missing user_id or g_hash. Please login again.");
@@ -112,9 +115,6 @@ export default function CloseShift() {
   };
 
   const getOpenCurrencies = async () => {
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
-
     if (!user_id || !g_hash) {
       alert("Missing user session. Please login again.");
       return;

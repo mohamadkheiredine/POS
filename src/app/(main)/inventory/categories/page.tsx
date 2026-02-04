@@ -13,6 +13,7 @@ import {
   Trash2,
   Layers,
 } from "lucide-react";
+import { useAppSelector } from "@/store/hooks";
 
 type Category = {
   pc_id: number;
@@ -32,6 +33,11 @@ export default function CategoriesPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
+  const auth = useAppSelector((s) => s.auth.loginData);
+
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+
   useEffect(() => {
     setLoading(true);
     setErrorMsg("");
@@ -42,8 +48,8 @@ export default function CategoriesPage() {
           "/request/api/products/getlistcategories",
         {
           params: {
-            user_id: Number(localStorage.getItem("user_id")),
-            g_hash: localStorage.getItem("g_hash"),
+            user_id,
+            g_hash,
             category_id: 0,
           },
         }
@@ -73,8 +79,8 @@ export default function CategoriesPage() {
       process.env.NEXT_PUBLIC_API_LINK + "/request/api/deletecategory",
       {
         params: {
-          user_id: Number(localStorage.getItem("user_id")),
-          g_hash: localStorage.getItem("g_hash"),
+          user_id,
+          g_hash,
           category_id: pc_id,
         },
       }

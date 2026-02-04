@@ -4,16 +4,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, FileSpreadsheet, FileText } from "lucide-react";
 import "react-day-picker/dist/style.css";
 import { DayPicker } from "react-day-picker";
-import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
 import { api } from "@/lib/api";
-import { forceLogout } from "@/lib/logout";
+// import { forceLogout } from "@/lib/logout";
 import { Printer } from "lucide-react";
+import { useAppSelector } from "@/store/hooks";
 
 // ───────────────────────────────
 // Types
 // ───────────────────────────────
-type Status = "open" | "in-progress" | "served" | "paid" | "void";
 
 type Order = {
   id: number;
@@ -94,14 +93,9 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
-  const [warehouse, setWarehouse] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
-
-  const [drawer, setDrawer] = useState<{ open: boolean; order?: Order | null }>(
-    { open: false, order: null }
-  );
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
 
@@ -109,6 +103,13 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
+
+  const auth = useAppSelector((s) => s.auth.loginData);
+
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+
+  console.log("AUTH ", auth);
 
   // useEffect(() => {
   //   const token = localStorage.getItem("access_token");
@@ -124,8 +125,8 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
 
       try {
         const params: any = {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
+          g_hash,
+          user_id,
           filter: dateFilter,
         };
 
@@ -241,8 +242,8 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
         `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/reprintreceipt`,
         {
           params: {
-            user_id: localStorage.getItem("user_id"),
-            g_hash: localStorage.getItem("g_hash"),
+            user_id,
+            g_hash,
             order_code: order.code,
           },
         }

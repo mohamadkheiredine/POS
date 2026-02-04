@@ -3,10 +3,12 @@
 import axios from "axios";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import React, { use, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import LanguageSwitch from "@/components/shared/language-switch";
 import { useI18n } from "@/hooks/useI18n";
 import LoginSwitch from "@/components/shared/loginSwitch";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { setAuth } from "@/store/slices/authSlice";
 
 export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const [username, setUsername] = useState("");
@@ -17,6 +19,14 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const { t } = useI18n(lang);
 
   const router = useRouter();
+  const dispatch = useAppDispatch();
+  const isLoggedIn = useAppSelector((s) => s.auth.isLoggedIn);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      router.push("/pos");
+    }
+  }, [isLoggedIn]);
 
   useEffect(() => {
     const user_id = localStorage.getItem("user_id");
@@ -40,32 +50,60 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
           user_name: username,
           password: password,
           ua_remember: false,
-        }
+        },
       );
 
       const data = response.data;
 
       // save data in local storage
-      localStorage.setItem("user_id", data.user_id);
-      localStorage.setItem("user_profile_url", data.user_profile_url);
-      localStorage.setItem("user_fullname", data.user_fullname);
-      localStorage.setItem("user_email", data.user_email);
-      localStorage.setItem("user_name", data.user_name);
-      localStorage.setItem("company_currency", data.company_currency);
-      localStorage.setItem("currency_symbol", data.currency_symbol);
-      localStorage.setItem("sec_company_currency", data.sec_currency_id);
-      localStorage.setItem("sec_currency_symbol", data.sec_currency_symbol);
-      localStorage.setItem("warehouse_id", data.warehouse_id);
-      localStorage.setItem("exchange_rate", data.exchange_rate);
-      localStorage.setItem("g_hash", data.g_hash);
-      localStorage.setItem("store_id", data.store_id);
-      localStorage.setItem("company_id", data.company_id);
+      // localStorage.setItem("user_id", data.user_id);
+      // localStorage.setItem("user_profile_url", data.user_profile_url);
+      // localStorage.setItem("user_fullname", data.user_fullname);
+      // localStorage.setItem("user_email", data.user_email);
+      // localStorage.setItem("user_name", data.user_name);
+      // localStorage.setItem("company_currency", data.company_currency);
+      // localStorage.setItem("currency_symbol", data.currency_symbol);
+      // localStorage.setItem("sec_company_currency", data.sec_currency_id);
+      // localStorage.setItem("sec_currency_symbol", data.sec_currency_symbol);
+      // localStorage.setItem("warehouse_id", data.warehouse_id);
+      // localStorage.setItem("exchange_rate", data.exchange_rate);
+      // localStorage.setItem("g_hash", data.g_hash);
+      // localStorage.setItem("store_id", data.store_id);
+      // localStorage.setItem("company_id", data.company_id);
 
       // localStorage.setItem("access_token", data.access_token);
       // localStorage.setItem("expires_in", String(data.expires_in));
 
+      const loginData = {
+        g_hash: data.g_hash ?? "",
+
+        user_id: String(data.user_id ?? ""),
+        user_profile_url: data.user_profile_url ?? null,
+        user_fullname: data.user_fullname ?? null,
+        user_email: data.user_email ?? null,
+        user_name: data.user_name ?? null,
+
+        company_currency: String(data.company_currency ?? ""),
+        currency_symbol: String(data.currency_symbol ?? ""),
+
+        sec_currency_id: String(data.sec_currency_id ?? ""),
+        sec_currency_symbol: String(data.sec_currency_symbol ?? ""),
+
+        warehouse_id: String(data.warehouse_id ?? ""),
+        exchange_rate: String(data.exchange_rate ?? ""),
+
+        store_id: String(data.store_id ?? ""),
+        company_id: String(data.company_id ?? ""),
+
+        allowed_currencies: Array.isArray(data.allowed_currencies)
+          ? data.allowed_currencies
+          : [],
+      };
+
+      dispatch(setAuth(loginData));
+
       router.push("/pos");
-      console.log("Login with", { username, password });
+  
     } catch (error) {
       console.log("Login error", error);
       alert("Login failed. Please check your credentials.");
@@ -96,7 +134,6 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
             {t.login.title}
           </h1>
           <p className="mt-1 text-sm text-gray-600">{t.login.subtitle}</p>
-          
 
           <form onSubmit={handleSubmit} className="mt-7 space-y-5">
             {/* Username (floating label) */}

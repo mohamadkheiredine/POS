@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   X,
   Plus,
@@ -18,17 +18,26 @@ import {
 import "@/components/theme/pages/pos.scss";
 import axios from "axios";
 import { useI18n } from "@/hooks/useI18n";
-import LanguageSwitch from "@/components/shared/language-switch";
 import { api } from "@/lib/api";
-import { forceLogout } from "@/lib/logout";
+// import { forceLogout } from "@/lib/logout";
 import { PlusSquare } from "lucide-react";
 import LoadOrderPopup from "@/components/include/editOrderPopup";
 import { OrderItemUI } from "@/components/include/editOrderPopup";
 
-import type {
-  PopupModifierGroup,
-  PopupModifierOption,
-} from "@/types/modifiers";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { setMenuItems, updateItemModifiers } from "@/store/slices/menuSlice";
+import {
+  setAllowedCurrencies,
+  setSelectedCurrency,
+} from "@/store/slices/allowedCurrenciesSlice";
+import {
+  removeOrder,
+  replaceOrderId,
+  updateOrderItems,
+  upsertManyOrders,
+  upsertOrder,
+} from "@/store/slices/ordersSlice";
+import { updateLoginStringField } from "@/store/slices/authSlice";
 
 /* =============================================================================
  * Types
@@ -46,25 +55,13 @@ type ModifierOption = {
   quantity: number;
 };
 
-type ModifierGroup = {
+export type ModifierGroup = {
   id: UID;
   name: string;
   type: "required" | "optional";
   minSelect?: number; // required min for type=required
   maxSelect?: number; // 0 = unlimited
   options: ModifierOption[];
-};
-
-type MenuItem = {
-  id: number;
-  name: string;
-  price: number;
-  categoryId: number;
-  currency_code: string;
-  cc_id: number;
-  categoryName?: string;
-
-  kitchen_station_id: number;
 };
 
 type AppliedModifier = {
@@ -93,19 +90,16 @@ type Table = {
   statusId: number;
 };
 
-type Order = {
-  id: UID;
-  guests?: number;
-  items: OrderItem[];
-  createdAt: number;
-  status: "open" | "paid" | "void";
-};
-
 type LocalOrder = {
   orderId: string;
   tableIds: number[];
   items: OrderItem[];
   isHeld?: boolean;
+
+  mergedMeta?: {
+    primaryTable: number;
+    mergedAt: number;
+  };
 
   customer?: {
     customer_id?: number;
@@ -122,15 +116,6 @@ type KitchenStationDB = {
   ks_name: string;
 };
 
-type AllowedCurrency = {
-  id: number;
-  storeId?: number;
-  currencyId: number;
-  companyId?: number;
-  rate: number;
-  currencyCode: string;
-  currencyName: string;
-};
 
 /* =============================================================================
  * Helpers
@@ -221,16 +206,6 @@ function clearHeldSnapshot() {
   localStorage.removeItem("last_held_order_id");
 }
 
-function upsertOrders(
-  prev: LocalOrder[],
-  incoming: LocalOrder[],
-): LocalOrder[] {
-  const map = new Map<string, LocalOrder>();
-  prev.forEach((o) => map.set(o.orderId, o));
-  incoming.forEach((o) => map.set(o.orderId, o));
-  return Array.from(map.values());
-}
-
 function orderItemsToUIItems(
   orderItems: OrderItem[],
   menu: any[],
@@ -269,8 +244,9 @@ const TEMP_ORDER_PREFIX = "tmp_";
  * Page
  * ========================================================================== */
 export default function POSClient({ lang }: { lang: "en" | "fr" }) {
-  const [menu, setMenu] = useState<any[]>([]);
+  const menu = useAppSelector((s) => s.menu.items);
   const [selectedCategory, setSelectedCategory] = useState<number>(0);
+  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const [CurrencySymbol, setCurrencySymbol] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -290,17 +266,26 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   );
   const [returnCurrencyId, setReturnCurrencyId] = useState<number | null>(null);
 
-  const [allowedCurrencies, setAllowedCurrencies] = useState<AllowedCurrency[]>(
-    [],
-  );
-  const [currencyRate, setCurrencyRate] = useState<number>(1);
+  const [transferMode, setTransferMode] = useState(false);
 
-  const [selectedCurrencyId, setSelectedCurrencyId] = useState<number | null>(
-    null,
+  const allowedCurrencies = useAppSelector((s) => s.allowedCurrencies.items);
+
+  const selectedCurrencyId = useAppSelector(
+    (s) => s.allowedCurrencies.selectedCurrencyId,
   );
+
+  const currencyRate = useAppSelector((s) => s.allowedCurrencies.rate);
 
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
   const isTakeawayNow = (tableId: number | null) => !tableId;
+
+  const auth = useAppSelector((s) => s.auth.loginData);
+
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+  const store_id = auth.store_id;
+  const company_id = auth.company_id;
+  const warehouse_id = auth.warehouse_id;
 
   // true if user changed anything since last sync
   const [editDirty, setEditDirty] = useState(false);
@@ -363,13 +348,32 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const localOrder: LocalOrder = {
       orderId: oid,
+
       tableIds: tableIds.length ? tableIds : [0],
+
       items: mappedItems,
+
+      customer: customer
+        ? {
+            customer_id: customer.customer_id ?? 0,
+            name: customer.name ?? "",
+            phone: customer.phone ?? "",
+            address: customer.address ?? "",
+          }
+        : {
+            customer_id: 0,
+            name: "",
+            phone: "",
+            address: "",
+          },
+
+      checkoutDraft: false,
+
       isHeld: false,
     };
 
     // update ordersInfo
-    setOrdersInfo((prev) => upsertOrders(prev, [localOrder]));
+    dispatch(upsertOrder(localOrder));
 
     setCurrentOrderId(oid);
     setCurrentTableId(tableIds[0] ?? null);
@@ -381,7 +385,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       createdAt: Date.now(),
       status: "open",
     });
-    console.log("customer loaded is ", customer);
 
     applyCustomerToUI(
       customer
@@ -395,20 +398,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     );
 
     if (customer) {
-      setOrdersInfo((prev) =>
-        prev.map((o) =>
-          o.orderId === oid
-            ? {
-                ...o,
-                customer: {
-                  customer_id: customer.customer_id,
-                  name: customer.name,
-                  phone: customer.phone,
-                  address: customer.address,
-                },
-              }
-            : o,
-        ),
+      dispatch(
+        upsertOrder({
+          ...ordersInfo.find((o) => o.orderId === oid)!,
+          customer: {
+            customer_id: customer.customer_id,
+            name: customer.name,
+            phone: customer.phone,
+            address: customer.address,
+          },
+        }),
       );
     }
 
@@ -416,19 +415,23 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   const convertPrice = (price: number) => {
-    return price * currencyRate;
+    return price * (currencyRate ?? 1);
   };
 
   useEffect(() => {
     const loadAllowedCurrencies = async () => {
+      if (allowedCurrencies.length > 0) {
+        return;
+      }
+
       const res = await api.get(
         `${process.env.NEXT_PUBLIC_API_LINK}/api/allowedcurrencies/getallowedcurrencies`,
         {
           params: {
-            g_hash: localStorage.getItem("g_hash"),
-            user_id: localStorage.getItem("user_id"),
-            store_id: localStorage.getItem("store_id"),
-            company_id: localStorage.getItem("company_id"),
+            g_hash,
+            user_id,
+            store_id,
+            company_id,
           },
         },
       );
@@ -443,30 +446,30 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         currencyName: c.cc_currency_name,
       }));
 
-      setAllowedCurrencies(mappedCurrencies);
+      dispatch(setAllowedCurrencies(mappedCurrencies));
 
-      // apply default currency from localStorage
-      const storedSymbol = localStorage.getItem("currency_symbol");
+      const storedSymbol = auth.currency_symbol;
 
-      if (storedSymbol) {
-        const defaultCurrency = mappedCurrencies.find(
-          (c: any) => c.currencyCode === storedSymbol,
+      const defaultCurrency =
+        mappedCurrencies.find((c: any) => c.currencyCode === storedSymbol) ||
+        mappedCurrencies[0];
+
+      if (defaultCurrency) {
+        dispatch(
+          setSelectedCurrency({
+            id: defaultCurrency.id,
+            rate: defaultCurrency.rate,
+          }),
         );
 
-        if (defaultCurrency) {
-          setSelectedCurrencyId(defaultCurrency.id);
-          setCurrencyRate(defaultCurrency.rate);
-          setCurrencySymbol(defaultCurrency.currencyCode);
-        }
-      } else {
-        // fallback: first allowed currency
-        const first = mappedCurrencies[0];
-        if (first) {
-          setSelectedCurrencyId(first.id);
-          setCurrencyRate(first.rate);
-          setCurrencySymbol(first.currencyCode);
-          localStorage.setItem("currency_symbol", first.currencyCode);
-        }
+        setCurrencySymbol(defaultCurrency.currencyCode);
+
+        dispatch(
+          updateLoginStringField({
+            key: "currency_symbol",
+            value: defaultCurrency.currencyCode,
+          }),
+        );
       }
     };
 
@@ -486,8 +489,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getstationsname`,
         {
           params: {
-            g_hash: localStorage.getItem("g_hash"),
-            user_id: localStorage.getItem("user_id"),
+            g_hash,
+            user_id,
           },
         },
       );
@@ -511,8 +514,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistmodifiers",
       {
         params: {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
+          g_hash,
+          user_id,
         },
       },
     );
@@ -534,7 +537,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   useEffect(() => {
-    setCurrencySymbol(localStorage.getItem("currency_symbol") || "");
+    setCurrencySymbol(auth.currency_symbol || "");
   }, []);
 
   // useEffect(() => {
@@ -550,8 +553,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       `${process.env.NEXT_PUBLIC_API_LINK}/api/inventory/getlistmodifiersperitem`,
       {
         params: {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
+          g_hash,
+          user_id,
           item_id: itemId,
         },
       },
@@ -562,32 +565,38 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     return res.data.data ?? [];
   }
 
+  const dispatch = useAppDispatch();
+
   const loadMenu = async () => {
+    if (menu.length > 0) {
+      return;
+    }
+
     const res = await api.get(
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistofitems",
       {
         params: {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
+          g_hash,
+          user_id,
         },
       },
     );
 
     if (res.data.is_error === 1) return;
 
-    setMenu(
-      res.data.lst_items.map((it: any) => ({
-        id: it.mi_id,
-        name: it.mi_item_name,
-        price: Number(it.mi_base_price ?? 0),
-        categoryId: it.mi_category_id,
-        currency_code: it.currency_code,
-        cc_id: it.cc_id,
-        categoryName: it.category_name,
-        kitchen_station_id: Number(it.mi_kitchen_station_id ?? 1),
-        modifierGroups: [],
-      })),
-    );
+    const mapped = res.data.lst_items.map((it: any) => ({
+      id: it.mi_id,
+      name: it.mi_item_name,
+      price: Number(it.mi_base_price ?? 0),
+      categoryId: it.mi_category_id,
+      currency_code: it.currency_code,
+      cc_id: it.cc_id,
+      categoryName: it.category_name,
+      kitchen_station_id: Number(it.mi_kitchen_station_id ?? 1),
+      modifierGroups: [],
+    }));
+
+    dispatch(setMenuItems(mapped));
   };
 
   useEffect(() => {
@@ -609,8 +618,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/listitemcategories",
       {
         params: {
-          g_hash: localStorage.getItem("g_hash"),
-          user_id: localStorage.getItem("user_id"),
+          g_hash,
+          user_id,
         },
       },
     );
@@ -636,8 +645,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlisttables",
           {
             params: {
-              g_hash: localStorage.getItem("g_hash"),
-              user_id: localStorage.getItem("user_id"),
+              g_hash,
+              user_id,
             },
           },
         );
@@ -670,23 +679,31 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     createdAt: Date.now(),
     status: "open",
   });
-  const [ordersInfo, setOrdersInfo] = useState<LocalOrder[]>([]);
+
+  const ordersInfo = useAppSelector((s) => s.orders.orders);
 
   // this useEffect responsable for reload ordersInfo on refresh
+  // wait for redux-persist to hydrate
+  const ordersLoaded = useAppSelector(
+    (state) => state.orders._persist?.rehydrated,
+  );
+
   useEffect(() => {
-    const saved = localStorage.getItem("orders_info");
-    if (!saved) {
-      setHydrating(false);
-      setHydrated(true);
-      return;
-    }
+    if (!ordersLoaded) return;
+    if (menu.length === 0) return;
+    if (hydrated) return;
 
-    const parsed: LocalOrder[] = JSON.parse(saved);
-    setOrdersInfo(parsed);
+    console.log("🔄 Restoration check", {
+      ordersLoaded,
+      menuCount: menu.length,
+      ordersCount: ordersInfo?.length || 0,
+    });
 
-    if (!parsed.length) {
-      setHydrating(false);
+    //Check if ordersInfo exists and is an array
+    if (!ordersInfo || !Array.isArray(ordersInfo) || ordersInfo.length === 0) {
+      console.log("⚠️ No orders to restore");
       setHydrated(true);
+      setHydrating(false);
       return;
     }
 
@@ -694,87 +711,118 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     let orderToRestore: LocalOrder | null = null;
 
-    /* restore unfinished takeaway draft */
-    orderToRestore =
-      [...parsed]
-        .reverse()
-        .find(
-          (o) =>
-            o.checkoutDraft === true &&
-            o.tableIds[0] === 0 &&
-            o.items.length > 0,
-        ) ?? null;
-
-    /* restore last active order ONLY if it's takeaway */
-    if (!orderToRestore && lastActiveId) {
-      const last = parsed.find((o) => o.orderId === lastActiveId);
-      if (last && last.tableIds[0] === 0) {
+    //Exact last active order
+    if (lastActiveId) {
+      const last = ordersInfo.find(
+        (o) => o?.orderId === lastActiveId && !o?.isHeld,
+      );
+      if (last && Array.isArray(last.items) && last.items.length > 0) {
         orderToRestore = last;
       }
     }
 
-    /* restore last takeaway with items */
+    //unfinished takeaway checkout - WITH SAFE ARRAY CHECKS
     if (!orderToRestore) {
       orderToRestore =
-        [...parsed]
-          .reverse()
-          .find((o) => o.tableIds[0] === 0 && o.items.length > 0) ?? null;
+        ordersInfo.find(
+          (o) =>
+            o?.checkoutDraft === true &&
+            Array.isArray(o?.tableIds) &&
+            o.tableIds.length > 0 &&
+            o.tableIds[0] === 0 &&
+            Array.isArray(o?.items) &&
+            o.items.length > 0 &&
+            !o?.isHeld,
+        ) ?? null;
+
     }
 
-    /* restore last dine-in ONLY as final fallback */
+    //any takeaway with items - WITH SAFE ARRAY CHECKS
     if (!orderToRestore) {
       orderToRestore =
-        [...parsed]
-          .reverse()
-          .find((o) => o.tableIds[0] !== 0 && o.items.length > 0) ?? null;
+        ordersInfo.find(
+          (o) =>
+            Array.isArray(o?.tableIds) &&
+            o.tableIds.length > 0 &&
+            o.tableIds[0] === 0 &&
+            Array.isArray(o?.items) &&
+            o.items.length > 0 &&
+            !o?.isHeld,
+        ) ?? null;
+
     }
 
-    if (orderToRestore) {
-      const tableId = orderToRestore.tableIds[0] ?? 0;
-
-      setCurrentOrderId(orderToRestore.orderId);
-      setCurrentTableId(tableId === 0 ? null : tableId);
-
-      setOrder({
-        id: orderToRestore.orderId,
-        guests: 0,
-        items: orderToRestore.items,
-        createdAt: Date.now(),
-        status: "open",
-      });
-
-      if (orderToRestore.customer) {
-        applyCustomerToUI({
-          customer_id: orderToRestore.customer.customer_id,
-          name: orderToRestore.customer.name,
-          phone: orderToRestore.customer.phone,
-          address: orderToRestore.customer.address,
-        });
-      } else {
-        applyCustomerToUI(null);
-      }
+    //any dine-in with items - WITH SAFE ARRAY CHECKS
+    if (!orderToRestore) {
+      orderToRestore =
+        ordersInfo.find(
+          (o) =>
+            Array.isArray(o?.tableIds) &&
+            o.tableIds.length > 0 &&
+            o.tableIds[0] !== 0 &&
+            Array.isArray(o?.items) &&
+            o.items.length > 0 &&
+            !o?.isHeld,
+        ) ?? null;
     }
 
-    setHydrating(false);
-    setHydrated(true);
-  }, []);
-
-  const markTakeawayDraft = (orderId: string | null) => {
-    if (!orderId) return;
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === orderId ? { ...o, checkoutDraft: true } : o,
-      ),
-    );
-  };
-
-  useEffect(() => {
-    if (!hydrated) {
+    if (!orderToRestore) {
+      setHydrated(true);
+      setHydrating(false);
       return;
     }
-    if (!ordersInfo.length) return;
-    localStorage.setItem("orders_info", JSON.stringify(ordersInfo));
-  }, [ordersInfo, hydrated, hydrating]);
+
+    // CRITICAL: Safely get tableId with fallback
+    const tableId =
+      Array.isArray(orderToRestore.tableIds) &&
+      orderToRestore.tableIds.length > 0
+        ? orderToRestore.tableIds[0]
+        : 0;
+
+    console.log("🎯 Restoring order:", {
+      orderId: orderToRestore.orderId,
+      tableId,
+      itemsCount: orderToRestore.items?.length || 0,
+    });
+
+    // Set current order ID and table
+    setCurrentOrderId(orderToRestore.orderId);
+    setCurrentTableId(tableId === 0 ? null : tableId);
+
+    // Restore order to UI - SAFE ITEMS ACCESS
+    setOrder({
+      id: orderToRestore.orderId,
+      guests: 0,
+      items: Array.isArray(orderToRestore.items) ? orderToRestore.items : [],
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    // Restore customer if available
+    if (orderToRestore.customer) {
+      applyCustomerToUI(orderToRestore.customer);
+    } else {
+      applyCustomerToUI(null);
+    }
+
+    // Mark as hydrated
+    setHydrated(true);
+    setHydrating(false);
+  }, [ordersLoaded, menu.length, ordersInfo, hydrated]);
+
+  useEffect(() => {
+    if (!currentOrderId) {
+      //only clear if we're hydrated
+      if (hydrated) {
+        localStorage.removeItem("last_active_order_id");
+      }
+      return;
+    }
+
+    // Don't update during hydration
+    if (hydrating) return;
+    localStorage.setItem("last_active_order_id", currentOrderId);
+  }, [currentOrderId, hydrating, hydrated]);
 
   // Modals / Drawers
   const [modItem, setModItem] = useState<any>(null); // item being configured
@@ -786,15 +834,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const [customerType, setCustomerType] = useState("takeaway");
   // 2 for cash and 4 for card
   const [paymentType, setPaymentType] = useState<number | null>(null);
-  const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const API_URL = process.env.NEXT_PUBLIC_API_LINK;
-  const [g_hash, setGHash] = useState<string | null>(null);
-  const [user_id, setUserId] = useState<string | null>(null);
 
   const [heldSnapshot, setHeldSnapshot] = useState<HeldSnapshot | null>(null);
   const [lastHeldOrderId, setLastHeldOrderId] = useState<string | null>(null);
-
-  const isEditing = typeof editingOrderId === "number" && editingOrderId > 0;
 
   const applyCustomerToUI = (
     c:
@@ -840,9 +883,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   );
 
   const checkOpenCash = async () => {
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
-
     try {
       const res = await axios.get(
         `${process.env.NEXT_PUBLIC_API_LINK}/api/shift/getopencurrencies`,
@@ -864,13 +904,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   const posDisabled = hasOpenCash === false;
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setGHash(localStorage.getItem("g_hash"));
-      setUserId(localStorage.getItem("user_id"));
-    }
-  }, []);
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -898,63 +931,138 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const total = convertPrice(totalOriginal);
 
   function mergeTables(t1: number, t2: number) {
-    const o1: any = ordersInfo.find((o) => o.tableIds.includes(t1));
-    const o2: any = ordersInfo.find((o) => o.tableIds.includes(t2));
+    const uiOrderForT1 =
+      // detect if table 1 is active table mean the user trying to merge the table that is currently opened?
+      currentTableId === t1 && currentOrderId
+        ? // iza ee, get the order by id
+          ordersInfo.find((o) => o.orderId === currentOrderId)
+        : null;
 
-    if (!o1 && !o2) return alert("Both tables have no orders");
+    const uiOrderForT2 =
+      currentTableId === t2 && currentOrderId
+        ? ordersInfo.find((o) => o.orderId === currentOrderId)
+        : null;
+
+    const o1 = uiOrderForT1 ?? ordersInfo.find((o) => o.tableIds.includes(t1));
+
+    const o2 = uiOrderForT2 ?? ordersInfo.find((o) => o.tableIds.includes(t2));
+    if (!o1 && !o2) {
+      alert("Both tables have no orders");
+      return;
+    }
+
+    if (o1?.isHeld || o2?.isHeld) {
+      alert("Cannot merge held orders. Unhold first.");
+      return;
+    }
 
     if (o1 && !o2) {
-      const updated = {
-        ...o1,
-        tableIds: Array.from(new Set([...o1.tableIds, t2])),
-      };
-      setOrdersInfo(
-        ordersInfo.map((o) => (o.orderId === o1.orderId ? updated : o)),
+      dispatch(
+        upsertOrder({
+          ...o1,
+          tableIds: Array.from(new Set([...o1.tableIds, t2])),
+          mergedMeta: {
+            primaryTable: t1,
+            mergedAt: Date.now(),
+          },
+        }),
       );
       return;
     }
+
     if (!o1 && o2) {
-      const updated = {
-        ...o2,
-        tableIds: Array.from(new Set([...o2.tableIds, t1])),
-      };
-      setOrdersInfo(
-        ordersInfo.map((o: any) => (o.orderId === o2.orderId ? updated : o)),
+      dispatch(
+        upsertOrder({
+          ...o2,
+          tableIds: Array.from(new Set([...o2.tableIds, t1])),
+          mergedMeta: {
+            primaryTable: t2,
+            mergedAt: Date.now(),
+          },
+        }),
       );
       return;
     }
 
-    // Both have orders
-    if (o1.orderId === o2.orderId) return alert("Same order already");
+    if (o1!.orderId === o2!.orderId) {
+      alert("Same order already");
+      return;
+    }
 
+    //preserve customer
+    const mergedCustomer = o1!.customer?.name ? o1!.customer : o2!.customer;
+
+    // we merge both orders
     const merged: LocalOrder = {
-      orderId: o1.orderId,
-      tableIds: Array.from(new Set([...o1.tableIds, ...o2.tableIds])),
-      items: [...o1.items, ...o2.items],
+      orderId: o1!.orderId,
+
+      tableIds: Array.from(new Set([...o1!.tableIds, ...o2!.tableIds])),
+
+      items: [...(o1!.items || []), ...(o2!.items || [])],
+
+      customer: mergedCustomer,
+
+      checkoutDraft: o1!.checkoutDraft || o2!.checkoutDraft,
+
+      mergedMeta: {
+        primaryTable: t1,
+        mergedAt: Date.now(),
+      },
+
+      isHeld: false,
     };
 
-    const remaining = ordersInfo.filter(
-      (o) => o.orderId !== o1.orderId && o.orderId !== o2.orderId,
-    );
-
-    setOrdersInfo([...remaining, merged]);
+    dispatch(removeOrder(o2!.orderId));
+    dispatch(upsertOrder(merged));
 
     if (currentTableId === t1 || currentTableId === t2) {
       setCurrentOrderId(merged.orderId);
       setCurrentTableId(t1);
+
       setOrder((prev: any) => ({
         ...prev,
         id: merged.orderId,
         items: merged.items,
       }));
+
+      // restore customer ui
+      applyCustomerToUI(merged.customer ?? null);
     }
   }
 
   const selectTable = async (table: Table) => {
-    if (currentTableId === table.id) return;
+    if (!mergeMode && currentTableId === table.id) {
+      return;
+    }
+
+    if (transferMode) {
+      if (currentTableId === null) {
+        alert("No active table to transfer from");
+        setTransferMode(false);
+        return;
+      }
+
+      // prevent transferring to same table
+      if (table.id === currentTableId) return;
+
+      transferTable(currentTableId, table.id);
+
+      setTransferMode(false);
+      return;
+    }
 
     if (mergeMode) {
       if (firstMergeTable === null) {
+        // accept active table as first
+        const hasOrder =
+          currentTableId === table.id ||
+          ordersInfo.some((o) => o.tableIds.includes(table.id));
+
+        if (!hasOrder) {
+          alert("First table must contain an order");
+          return;
+        }
+
         setFirstMergeTable(table.id);
         alert(`Now select the second table to merge with ${table.label}`);
         return;
@@ -968,22 +1076,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     if (editingOrderId) {
       const oid = String(editingOrderId);
-
       setCurrentOrderId(oid);
       setCurrentTableId(table.id);
 
-      setOrdersInfo((prev) =>
-        prev.map((o) =>
-          o.orderId === oid ? { ...o, tableIds: [table.id] } : o,
-        ),
-      );
+      const order = ordersInfo.find((o) => o.orderId === oid);
+      if (order) {
+        dispatch(
+          upsertOrder({
+            ...order,
+            tableIds: [table.id],
+          }),
+        );
+      }
 
       setOrder((prev: any) => ({ ...prev, id: oid }));
-
       return;
     }
 
-    const existing = ordersInfo.find(
+    const existing = ordersInfo?.find(
       (o) => o.tableIds.includes(table.id) && !o.isHeld,
     );
 
@@ -992,10 +1102,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     );
 
     if (held) {
-      setOrdersInfo((prev) =>
-        prev.map((o) =>
-          o.orderId === held.orderId ? { ...o, isHeld: false } : o,
-        ),
+      console.log("🔓 Restoring held order:", held.orderId);
+
+      dispatch(
+        upsertOrder({
+          ...held,
+          isHeld: false,
+        }),
       );
 
       const snap = readHeldSnapshot();
@@ -1010,10 +1123,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       setOrder({
         id: held.orderId,
-        items: held.items,
+        items: held.items || [],
         createdAt: Date.now(),
         status: "open",
       });
+
+      // restore customer
+      applyCustomerToUI(held.customer ?? null);
 
       return;
     }
@@ -1024,32 +1140,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
       setOrder({
         id: existing.orderId,
-        items: existing.items,
+        items: existing.items || [],
         createdAt: Date.now(),
         status: "open",
       });
 
-      if (existing.customer) {
-        setSelectedCustomer({
-          customer_id: existing.customer.customer_id,
-          customer_name: existing.customer.name,
-          customer_mobile: existing.customer.phone,
-          customer_address: existing.customer.address,
-        });
-
-        setCustomerName(existing.customer.name ?? "");
-        setCustomerPhone(existing.customer.phone ?? "");
-        setCustomerAddress(existing.customer.address ?? "");
-      } else {
-        setSelectedCustomer(null);
-        setCustomerName("");
-        setCustomerPhone("");
-        setCustomerAddress("");
-      }
+      // restore customer
+      applyCustomerToUI(existing.customer ?? null);
 
       return;
     }
-
     const tempOrderId = TEMP_ORDER_PREFIX + uid();
 
     setCurrentTableId(table.id);
@@ -1062,24 +1162,29 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       status: "open",
     });
 
-    setOrdersInfo((prev) => [
-      ...prev,
-      {
+    dispatch(
+      upsertOrder({
         orderId: tempOrderId,
+
         tableIds: [table.id],
+
         items: [],
+
+        customer: {
+          customer_id: null,
+          name: "",
+          phone: "",
+          address: "",
+        },
+
+        checkoutDraft: false,
+
         isHeld: false,
-      },
-    ]);
+      }),
+    );
 
-    setSelectedCustomer(null);
-    setCustomerName("");
-    setCustomerPhone("");
-    setCustomerAddress("");
+    applyCustomerToUI(null);
     setTakeawayPreview(false);
-
-    const store_id = localStorage.getItem("store_id");
-    const company_id = localStorage.getItem("company_id");
 
     api
       .post(API_URL + "/api/orders/createemptyorder", {
@@ -1093,29 +1198,29 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
         const realOrderId = String(res.data.order_id);
 
-        setOrdersInfo((prev) =>
-          prev.map((o) =>
-            o.orderId === tempOrderId ? { ...o, orderId: realOrderId } : o,
-          ),
-        );
+        dispatch(replaceOrderId({ tempId: tempOrderId, realId: realOrderId }));
 
         setCurrentOrderId((id) => (id === tempOrderId ? realOrderId : id));
-
         setOrder((o: any) =>
           o.id === tempOrderId ? { ...o, id: realOrderId } : o,
         );
+
+        const last = localStorage.getItem("last_active_order_id");
+        if (last === tempOrderId) {
+          localStorage.setItem("last_active_order_id", realOrderId);
+        }
       })
-      .catch(() => {
-        throw new Error("there is an error in make table active immediatly");
+      .catch((err) => {
+        console.error("❌ Error creating order:", err);
       });
   };
 
   useEffect(() => {
     async function loadPendingOrders() {
       const res = await api.post(API_URL + "/api/orders/sync", {
-        g_hash: localStorage.getItem("g_hash"),
-        user_id: localStorage.getItem("user_id"),
-        store_id: localStorage.getItem("store_id"),
+        g_hash,
+        user_id,
+        store_id,
       });
 
       if (res.data.is_error) return;
@@ -1126,16 +1231,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         items: o.items.map((it: any) => {
           const menuItem = menu.find((m) => m.id === it.item_id);
 
-          const mods: AppliedModifier[] = (it.modifiers ?? []).map((m: any) => {
-            const optionId = Number(m.modifier_id);
-            return {
+          const mods: AppliedModifier[] = (it.modifiers ?? []).map(
+            (m: any) => ({
               groupId: 1,
-              optionId,
+              optionId: Number(m.modifier_id),
               qty: normalizeModifierQty(m.quantity ?? m.qty ?? 1),
-            };
-          });
-
-          const extra = priceFromModifiers(menuItem?.modifierGroups, mods);
+            }),
+          );
 
           return {
             uid: uid(),
@@ -1146,33 +1248,41 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             stationId: it.station_id ?? menuItem?.kitchen_station_id ?? 1,
             note: normalizeNote(it.notes),
             modifiers: mods,
-            priceExtra: extra,
+            priceExtra: priceFromModifiers(menuItem?.modifierGroups, mods),
             sentToKitchen: true,
           };
         }),
+
+        customer: {
+          customer_id: o.customer?.customer_id ?? null,
+          name: o.customer?.name ?? "",
+          phone: o.customer?.phone ?? "",
+          address: o.customer?.address ?? "",
+        },
+        checkoutDraft: false,
+
+        isHeld: false,
       }));
 
-      setOrdersInfo((prev) => {
-        const localOnly = prev.filter(
-          (o) =>
-            o.isHeld ||
-            o.tableIds[0] === 0 ||
-            !loadedOrders.some((lo) => lo.orderId === o.orderId),
-        );
-
-        return upsertOrders(
-          localOnly,
-          loadedOrders.map((o) => {
-            const local = prev.find((p) => p.orderId === o.orderId);
-            return local?.customer ? { ...o, customer: local.customer } : o;
-          }),
-        );
-      });
+      dispatch(upsertManyOrders(loadedOrders));
     }
+
     if (menu.length > 0) {
       loadPendingOrders();
     }
   }, [menu]);
+
+  useEffect(() => {
+    if (!ordersInfo?.length) return;
+
+    const fixed = ordersInfo.map((o) => ({
+      ...o,
+      items: Array.isArray(o.items) ? o.items : [],
+      tableIds: Array.isArray(o.tableIds) ? o.tableIds : [0],
+    }));
+
+    dispatch(upsertManyOrders(fixed));
+  }, [ordersLoaded]);
 
   useEffect(() => {
     if (!hydrated || !currentOrderId) return;
@@ -1218,8 +1328,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         ]
       : [];
 
-    setMenu((prev) =>
-      prev.map((x) => (x.id === item.id ? { ...x, modifierGroups } : x)),
+    dispatch(
+      updateItemModifiers({
+        id: item.id,
+        modifierGroups,
+      }),
     );
 
     setModItem({ ...item, modifierGroups });
@@ -1255,25 +1368,22 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     let orderId = currentOrderId;
 
     if (!orderId) {
-      orderId = uid();
+      orderId = TEMP_ORDER_PREFIX + uid();
 
       setCurrentOrderId(orderId);
       setCurrentTableId(null);
 
-      const newOrder: LocalOrder = {
-        orderId,
-        tableIds: [0],
-        items: [],
-        checkoutDraft: true,
-      };
+      // save to localStorage immediately
+      localStorage.setItem("last_active_order_id", orderId);
 
-      setOrdersInfo((prev) => [...prev, newOrder]);
-      // setOrdersInfo((prev) =>
-      //   prev.map((o) =>
-      //     o.orderId === orderId ? { ...o, checkoutDraft: true } : o,
-      //   ),
-      // );
-      markTakeawayDraft(orderId);
+      dispatch(
+        upsertOrder({
+          orderId,
+          tableIds: [0],
+          items: [],
+          checkoutDraft: true,
+        }),
+      );
 
       setOrder({
         id: orderId,
@@ -1294,9 +1404,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       qty: 1,
       stationId: modItem.kitchen_station_id,
       note: "",
-
       modifiers: modSelected,
-
       priceExtra,
       sentToKitchen: false,
     };
@@ -1307,10 +1415,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       items: [...(o.items ?? []), newLine],
     }));
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === orderId ? { ...o, items: [...o.items, newLine] } : o,
-      ),
+    const order = ordersInfo.find((o) => o.orderId === orderId);
+
+    dispatch(
+      updateOrderItems({
+        id: orderId,
+        items: [...(order?.items ?? []), newLine],
+      }),
     );
 
     if (editingOrderId) setEditDirty(true);
@@ -1323,7 +1434,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     if (!orderData) return alert("Order not found");
 
-    if (!g_hash || !user_id) return alert("Missing auth");
+    if (!g_hash || !user_id) {
+      return alert("Missing auth");
+    }
 
     const payload = {
       g_hash,
@@ -1347,7 +1460,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           discount: 0,
           station_id: li.stationId,
           notes: li.note || "",
-          modifiers: li.modifiers.map((m) => ({
+          modifiers: li.modifiers.map((m: any) => ({
             id: Number(m.optionId),
           })),
         })),
@@ -1387,22 +1500,15 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
 
-    setOrder((o: any) => ({
-      ...o,
-      items: o.items.map((x: any) => (x.uid === updated.uid ? updated : x)),
-    }));
+    const order = ordersInfo.find((o) => o.orderId === currentOrderId);
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === currentOrderId
-          ? {
-              ...o,
-              items: o.items.map((x: any) =>
-                x.uid === updated.uid ? updated : x,
-              ),
-            }
-          : o,
-      ),
+    dispatch(
+      updateOrderItems({
+        id: currentOrderId!,
+        items: order!.items.map((x: any) =>
+          x.uid === updated.uid ? updated : x,
+        ),
+      }),
     );
 
     if (editingOrderId) setEditDirty(true);
@@ -1416,13 +1522,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       items: o.items.filter((x: any) => x.uid !== uidLine),
     }));
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === currentOrderId
-          ? { ...o, items: o.items.filter((x: any) => x.uid !== uidLine) }
-          : o,
-      ),
+    dispatch(
+      updateOrderItems({
+        id: currentOrderId!,
+        items: order.items.filter((x: any) => x.uid !== uidLine),
+      }),
     );
+
     if (editingOrderId) setEditDirty(true);
   };
 
@@ -1438,7 +1544,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
 
     if (editingOrderId && !editDirty) {
-      setOrdersInfo((prev) => prev.filter((o) => o.orderId !== currentOrderId));
+      dispatch(removeOrder(currentOrderId!));
 
       setEditingOrderId(null);
       setEditDirty(false);
@@ -1466,7 +1572,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const orderType = isTakeaway ? "takeaway" : "dine_in";
 
-    const baseCurrencyId = Number(localStorage.getItem("company_currency"));
+    const baseCurrencyId = Number(auth.company_currency);
 
     if (!baseCurrencyId) {
       alert("Company base currency is missing");
@@ -1547,11 +1653,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const payload = {
       order_id: orderType === "dine_in" ? dineInOrderId : null,
-      g_hash: localStorage.getItem("g_hash"),
-      warehouse_id: localStorage.getItem("warehouse_id"),
-      user_id: localStorage.getItem("user_id"),
-      company_id: localStorage.getItem("company_id"),
-      store_id: localStorage.getItem("store_id"),
+      g_hash,
+      warehouse_id,
+      user_id,
+      company_id,
+      store_id,
 
       currency_id: baseCurrencyId,
       currency_display_id: Number(displayCurrencyId),
@@ -1595,9 +1701,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
 
     if (!editingOrderId) {
-      setOrdersInfo((prev) =>
-        prev.filter((o) => o.orderId !== orderData.orderId),
-      );
+      dispatch(removeOrder(orderData.orderId));
     }
 
     setEditingOrderId(null);
@@ -1611,17 +1715,49 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       status: "open",
     });
 
-    // clear takeaway draft flag after successful save
-    // see if customer logic will break if we remove this
-    // setOrdersInfo((prev) =>
-    //   prev.map((o) =>
-    //     o.orderId === orderData.orderId ? { ...o, checkoutDraft: false } : o,
-    //   ),
-    // );
+    // remove only the saved order
+    dispatch(removeOrder(orderData.orderId));
 
-    setCurrentOrderId(null);
-    localStorage.removeItem("last_active_order_id");
-    setCurrentTableId(null);
+    // find remaining unfinished takeaway
+    const unfinishedTakeaway = ordersInfo.find(
+      (o) =>
+        o.orderId !== orderData.orderId && // not the order we just paid y3ne ignore the order l3mltela pay&close
+        o.tableIds?.[0] === 0 && // table 0 = takeaway
+        o.items?.length > 0 && // must contain items
+        !o.isHeld, // not a held order
+    );
+
+    if (unfinishedTakeaway) {
+      // restore takeaway
+      setCurrentOrderId(unfinishedTakeaway.orderId);
+      setCurrentTableId(null);
+
+      setOrder({
+        id: unfinishedTakeaway.orderId,
+        guests: 0,
+        items: unfinishedTakeaway.items,
+        createdAt: Date.now(),
+        status: "open",
+      });
+
+      applyCustomerToUI(unfinishedTakeaway.customer ?? null);
+
+      localStorage.setItem("last_active_order_id", unfinishedTakeaway.orderId);
+    } else {
+      // normal reset if no takeaway order exist
+      setCurrentOrderId(null);
+      setCurrentTableId(null);
+      localStorage.removeItem("last_active_order_id");
+
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+    }
+
     setSelectedCustomer(null);
     setCustomerName("");
     setCustomerPhone("");
@@ -1662,9 +1798,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   useEffect(() => {
-    const actives = ordersInfo
-      .filter((o) => !o.isHeld && o.items.length >= 0)
-      .flatMap((o) => o.tableIds);
+    const actives = (ordersInfo || [])
+      .filter((o) => !o?.isHeld && Array.isArray(o?.items))
+      .flatMap((o) => o.tableIds || []);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
@@ -1720,32 +1856,58 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       ),
     }));
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === currentOrderId
-          ? {
-              ...o,
-              items: o.items.map((x: any) =>
-                x.uid === lineUid
-                  ? { ...x, qty: Math.max(1, x.qty + delta) }
-                  : x,
-              ),
-            }
-          : o,
-      ),
-    );
+    const order = ordersInfo.find((o) => o.orderId === currentOrderId);
+
+    if (order) {
+      dispatch(
+        updateOrderItems({
+          id: currentOrderId!,
+          items: order.items.map((x: any) =>
+            x.uid === lineUid ? { ...x, qty: Math.max(1, x.qty + delta) } : x,
+          ),
+        }),
+      );
+    }
     if (editingOrderId) setEditDirty(true);
   };
 
   const holdOrder = () => {
-    if (posDisabled) return;
-    if (!currentOrderId) return;
-    if (!order.items?.length) return;
+    if (posDisabled) {
+      return;
+    }
+    if (!currentOrderId) {
+      return;
+    }
+
+    // get info for current order
+    const info = ordersInfo.find((o) => o.orderId === currentOrderId);
+
+    if (!info) {
+      return;
+    }
+
+    if (!info.items?.length) {
+      alert("Cannot hold empty order");
+      return;
+    }
+
+    if (info.isHeld) {
+      return;
+    }
+
+    const otherHeld = ordersInfo.find(
+      (o) => o.isHeld && o.orderId !== currentOrderId,
+    );
+
+    if (otherHeld) {
+      alert("Another order is already on hold");
+      return;
+    }
 
     const snap: HeldSnapshot = {
       orderId: currentOrderId,
       tableIds: [currentTableId ?? 0],
-      items: order.items,
+      items: info.items,
       heldAt: Date.now(),
     };
 
@@ -1753,33 +1915,26 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setHeldSnapshot(snap);
     setLastHeldOrderId(currentOrderId);
 
-    setOrdersInfo((prev) => {
-      const idx = prev.findIndex((o) => o.orderId === currentOrderId);
-      if (idx === -1) {
-        return [
-          ...prev,
-          {
-            orderId: currentOrderId,
-            tableIds: [currentTableId ?? 0],
-            items: order.items,
-            isHeld: true,
-          },
-        ];
-      }
-      const copy = [...prev];
-      copy[idx] = {
-        ...copy[idx],
-        tableIds: copy[idx].tableIds?.length
-          ? copy[idx].tableIds
-          : [currentTableId ?? 0],
-        items: order.items?.length ? order.items : copy[idx].items,
-        isHeld: true,
-      };
-      return copy;
-    });
+    dispatch(
+      upsertOrder({
+        ...info,
 
+        isHeld: true,
+
+        // freeze current customer state
+        customer: info.customer ?? {
+          customer_id: null,
+          name: "",
+          phone: "",
+          address: "",
+        },
+      }),
+    );
+
+    // reset ui
     setCurrentOrderId(null);
     setCurrentTableId(null);
+
     setOrder({
       id: uid(),
       guests: 0,
@@ -1838,48 +1993,46 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, [posDisabled, activeHeldOrder]);
 
   const loadHeldOrder = () => {
-    if (posDisabled) return;
+    if (posDisabled) {
+      return;
+    }
 
     const snap = activeHeldOrder ?? readHeldSnapshot();
-    if (!snap?.orderId) return;
+    if (!snap?.orderId) {
+      return;
+    }
+
+    const info = ordersInfo.find((o) => o.orderId === snap.orderId);
+    if (!info) {
+      return;
+    }
 
     // unhold
-    setOrdersInfo((prev) => {
-      const idx = prev.findIndex((o) => o.orderId === snap.orderId);
-      if (idx === -1) {
-        return [
-          ...prev,
-          {
-            orderId: snap.orderId,
-            tableIds: snap.tableIds?.length ? snap.tableIds : [0],
-            items: snap.items ?? [],
-            isHeld: false,
-          },
-        ];
-      }
-      const copy = [...prev];
-      copy[idx] = {
-        ...copy[idx],
+    dispatch(
+      upsertOrder({
+        ...info,
         isHeld: false,
-        items: snap.items ?? copy[idx].items,
-      };
-      return copy;
-    });
+      }),
+    );
 
-    setCurrentOrderId(snap.orderId);
+    //restore ui
+    setCurrentOrderId(info.orderId);
 
     const tableId =
-      snap.tableIds?.length && snap.tableIds[0] !== 0 ? snap.tableIds[0] : null;
+      info.tableIds?.length && info.tableIds[0] !== 0 ? info.tableIds[0] : null;
 
     setCurrentTableId(tableId);
 
     setOrder({
-      id: snap.orderId,
+      id: info.orderId,
       guests: 0,
-      items: snap.items ?? [],
+      items: info.items ?? [],
       createdAt: Date.now(),
       status: "open",
     });
+
+    // restore customer
+    applyCustomerToUI(info.customer ?? null);
 
     clearHeldSnapshot();
     setHeldSnapshot(null);
@@ -1892,10 +2045,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const updatedItems = orderItemsToUIItems(order.items, menu);
 
     await api.post(`${process.env.NEXT_PUBLIC_API_LINK}/api/orders/saveorder`, {
-      g_hash: localStorage.getItem("g_hash"),
-      user_id: localStorage.getItem("user_id"),
-      store_id: localStorage.getItem("store_id"),
-      warehouse_id: localStorage.getItem("warehouse_id"),
+      g_hash,
+      user_id,
+      store_id,
+      warehouse_id,
 
       order_id: orderId,
 
@@ -1920,7 +2073,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setOriginalItems(updatedItems);
     setEditDirty(false);
 
-    setOrdersInfo((prev) => prev.filter((o) => o.orderId !== currentOrderId));
+    dispatch(removeOrder(currentOrderId!));
 
     setEditingOrderId(null);
     setEditDirty(false);
@@ -1951,10 +2104,13 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (!currentOrderId) return;
     applyCustomerToUI(customer);
 
-    setOrdersInfo((prev) =>
-      prev.map((o) =>
-        o.orderId === currentOrderId ? { ...o, customer: { ...customer } } : o,
-      ),
+    const order = ordersInfo.find((o) => o.orderId === currentOrderId);
+
+    dispatch(
+      upsertOrder({
+        ...order!,
+        customer: { ...customer },
+      }),
     );
 
     if (editingOrderId) setEditDirty(true);
@@ -1966,6 +2122,51 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     localStorage.setItem("last_active_order_id", currentOrderId);
   }, [currentOrderId, hydrating]);
+
+  console.log("Redux Auth:", auth);
+
+  useEffect(() => {
+    if (ordersLoaded) {
+      setHydrated(true);
+      setHydrating(false);
+    }
+  }, [ordersLoaded]);
+
+  function transferTable(fromTable: number, toTable: number) {
+    // find order linked to fromTable
+    const existing = ordersInfo.find(
+      (o) => o.tableIds.includes(fromTable) && !o.isHeld,
+    );
+
+    if (!existing) {
+      alert("No order on this table");
+      return;
+    }
+
+    if (existing.isHeld) {
+      alert("Cannot transfer held order");
+      return;
+    }
+
+    dispatch(
+      upsertOrder({
+        ...existing,
+        tableIds: [toTable],
+      }),
+    );
+
+    // if user is viewing this order 3mal update ui
+    if (currentTableId === fromTable) {
+      setCurrentTableId(toTable);
+      setCurrentOrderId(existing.orderId);
+
+      setOrder((prev: any) => ({
+        ...prev,
+        id: existing.orderId,
+        items: existing.items,
+      }));
+    }
+  }
 
   /* -------------------- render -------------------- */
   return (
@@ -1987,6 +2188,17 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     : "hover:bg-emerald-700"
                 }`}
                 disabled={posDisabled}
+                onClick={() => {
+                  if (currentTableId === null) {
+                    alert("Open a table first, then press Transfer.");
+                    return;
+                  }
+
+                  setTransferMode(true);
+                  alert(
+                    `Select destination table to transfer from ${currentTableId}`,
+                  );
+                }}
               >
                 {t.POS.transfer}
               </button>
@@ -2200,10 +2412,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                 }`}
                 disabled={posDisabled}
                 onClick={() => {
+                  const def = selectedCurrencyId ?? allowedCurrencies[0]?.id;
                   setPaidAmount(0);
-                  setPaidCurrencyId(selectedCurrencyId);
-                  setRemainingCurrencyId(selectedCurrencyId);
-                  setReturnCurrencyId(selectedCurrencyId);
+                  setPaidCurrencyId(def);
+                  setRemainingCurrencyId(def);
+                  setReturnCurrencyId(def);
 
                   setPaymentPopupOpen(true);
                 }}
@@ -2429,12 +2642,19 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         type="button"
                         disabled={posDisabled}
                         onClick={() => {
-                          setSelectedCurrencyId(c.id);
-                          setCurrencyRate(c.rate);
+                          dispatch(
+                            setSelectedCurrency({
+                              id: c.id,
+                              rate: c.rate,
+                            }),
+                          );
+
                           setCurrencySymbol(c.currencyCode);
-                          localStorage.setItem(
-                            "currency_symbol",
-                            c.currencyCode,
+                          dispatch(
+                            updateLoginStringField({
+                              key: "currency_symbol",
+                              value: c.currencyCode,
+                            }),
                           );
                         }}
                         className={`h-11 w-full
@@ -3132,8 +3352,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     }
 
                     const payload = {
-                      g_hash: localStorage.getItem("g_hash"),
-                      user_id: localStorage.getItem("user_id"),
+                      g_hash,
+                      user_id,
                       customer_id: 0,
                       ic_customer_name: customerName,
                       ic_customer_address: customerAddress,
@@ -3178,22 +3398,24 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
                   // If takeaway: mark checkoutDraft + customer snapshot for refresh restore
                   if (isTakeawayNow(currentTableId)) {
-                    setOrdersInfo((prev) =>
-                      prev.map((o) =>
-                        o.orderId === currentOrderId
-                          ? {
-                              ...o,
-                              checkoutDraft: true,
-                              customer: {
-                                customer_id: finalCustomerId ?? undefined,
-                                name: customerName,
-                                phone: customerPhone,
-                                address: customerAddress,
-                              },
-                            }
-                          : o,
-                      ),
+                    const order = ordersInfo.find(
+                      (o) => o.orderId === currentOrderId,
                     );
+
+                    if (order) {
+                      dispatch(
+                        upsertOrder({
+                          ...order,
+                          checkoutDraft: true,
+                          customer: {
+                            customer_id: finalCustomerId ?? undefined,
+                            name: customerName,
+                            phone: customerPhone,
+                            address: customerAddress,
+                          },
+                        }),
+                      );
+                    }
                   }
 
                   // SAVE TO DATABASE

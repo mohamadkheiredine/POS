@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 
 import React, { useEffect, useRef, useState } from "react";
 import LoginSwitch from "@/components/shared/loginSwitch";
-
+import { setAuth } from "@/store/slices/authSlice";
+import { useAppDispatch } from "@/store/hooks";
 
 const PIN_LENGTH = 5;
 
@@ -21,6 +22,8 @@ export default function PinLoginPage() {
   useEffect(() => {
     hiddenInputRef.current?.focus();
   }, []);
+
+  const dispatch = useAppDispatch();
 
   const push = (d: string) => {
     setError("");
@@ -62,27 +65,55 @@ export default function PinLoginPage() {
 
       const data = res.data;
 
-      localStorage.setItem("user_id", data.user_id);
-      localStorage.setItem("user_profile_url", data.user_profile_url);
-      localStorage.setItem("user_fullname", data.user_fullname);
-      localStorage.setItem("user_email", data.user_email);
-      localStorage.setItem("user_name", data.user_name);
+      // localStorage.setItem("user_id", data.user_id);
+      // localStorage.setItem("user_profile_url", data.user_profile_url);
+      // localStorage.setItem("user_fullname", data.user_fullname);
+      // localStorage.setItem("user_email", data.user_email);
+      // localStorage.setItem("user_name", data.user_name);
 
-      localStorage.setItem("company_currency", data.company_currency);
-      localStorage.setItem("currency_symbol", data.currency_symbol);
+      // localStorage.setItem("company_currency", data.company_currency);
+      // localStorage.setItem("currency_symbol", data.currency_symbol);
 
-      localStorage.setItem("sec_company_currency", data.sec_currency_id);
-      localStorage.setItem("sec_currency_symbol", data.sec_currency_symbol);
+      // localStorage.setItem("sec_company_currency", data.sec_currency_id);
+      // localStorage.setItem("sec_currency_symbol", data.sec_currency_symbol);
 
-      localStorage.setItem("warehouse_id", data.warehouse_id);
-      localStorage.setItem("exchange_rate", data.exchange_rate);
+      // localStorage.setItem("warehouse_id", data.warehouse_id);
+      // localStorage.setItem("exchange_rate", data.exchange_rate);
 
-      localStorage.setItem("g_hash", data.g_hash);
-      localStorage.setItem("store_id", data.store_id);
-      localStorage.setItem("company_id", data.company_id);
+      // localStorage.setItem("g_hash", data.g_hash);
+      // localStorage.setItem("store_id", data.store_id);
+      // localStorage.setItem("company_id", data.company_id);
 
       // localStorage.setItem("access_token", data.access_token);
       // localStorage.setItem("expires_in", String(data.expires_in));
+
+      const loginData = {
+        g_hash: data.g_hash ?? "",
+
+        user_id: String(data.user_id ?? ""),
+        user_profile_url: data.user_profile_url ?? null,
+        user_fullname: data.user_fullname ?? null,
+        user_email: data.user_email ?? null,
+        user_name: data.user_name ?? null,
+
+        company_currency: String(data.company_currency ?? ""),
+        currency_symbol: String(data.currency_symbol ?? ""),
+
+        sec_currency_id: String(data.sec_currency_id ?? ""),
+        sec_currency_symbol: String(data.sec_currency_symbol ?? ""),
+
+        warehouse_id: String(data.warehouse_id ?? ""),
+        exchange_rate: String(data.exchange_rate ?? ""),
+
+        store_id: String(data.store_id ?? ""),
+        company_id: String(data.company_id ?? ""),
+
+        allowed_currencies: Array.isArray(data.allowed_currencies)
+          ? data.allowed_currencies
+          : [],
+      };
+
+      dispatch(setAuth(loginData));
 
       router.push("/pos");
     } catch (e) {
@@ -104,7 +135,7 @@ export default function PinLoginPage() {
   return (
     <div className="w-full max-w-md">
       <div className="mx-auto overflow-hidden rounded-3xl bg-white/70 backdrop-blur-xl shadow-[0_20px_60px_rgba(17,24,39,0.18)] ring-1 ring-white/60">
-      <LoginSwitch />
+        <LoginSwitch />
         {/* header */}
         <div className="flex items-center gap-3 px-8 pt-8">
           <Image
@@ -118,7 +149,6 @@ export default function PinLoginPage() {
         </div>
 
         <div className="px-8 pb-8 pt-4">
-          
           <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">
             Quick sign-in
           </h1>

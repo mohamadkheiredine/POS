@@ -195,13 +195,13 @@ export default function FloorPage() {
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
+  // useEffect(() => {
+  //   const token = localStorage.getItem("access_token");
 
-    if (!token) {
-      forceLogout("You are not logged in. Please login.");
-    }
-  }, []);
+  //   if (!token) {
+  //     forceLogout("You are not logged in. Please login.");
+  //   }
+  // }, []);
 
   const filtered = useMemo(
     () =>

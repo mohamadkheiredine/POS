@@ -5,6 +5,7 @@ import axios from "axios";
 import Select from "react-select";
 import { SearchableMenuList } from "@/components/shared/searchableMenuList";
 import { useRouter } from "next/navigation";
+import { useAppSelector } from "@/store/hooks";
 
 type BalanceRow = {
   id: string;
@@ -29,10 +30,12 @@ export default function OpenShift() {
   const [currencies, setCurrencies] = useState<CurrencyData[]>([]);
   const [shiftOpen, setShiftOpen] = useState(false);
 
-  const loadOpenShift = async (): Promise<boolean> => {
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
+  const auth = useAppSelector((s) => s.auth.loginData);
 
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+
+  const loadOpenShift = async (): Promise<boolean> => {
     try {
       const res = await axios.get(
         `${process.env.NEXT_PUBLIC_API_LINK}/api/shift/getopencurrencies`,
@@ -67,9 +70,6 @@ export default function OpenShift() {
   const router = useRouter();
 
   const GetListCurrencies = async () => {
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
-
     const url =
       process.env.NEXT_PUBLIC_API_LINK + "/request/api/getlistcurrency";
 
@@ -195,9 +195,6 @@ export default function OpenShift() {
         return;
       }
     }
-
-    const user_id = localStorage.getItem("user_id");
-    const g_hash = localStorage.getItem("g_hash");
 
     const payload = {
       user_id,

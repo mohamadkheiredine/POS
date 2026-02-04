@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChefHat,
   Timer,
@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { useI18n } from "@/hooks/useI18n";
 import { api } from "@/lib/api";
-import { forceLogout } from "@/lib/logout";
+import { useAppSelector } from "@/store/hooks";
+// import { forceLogout } from "@/lib/logout";
 
 /* ─────────────────────────────────────────
  * Types
@@ -43,6 +44,7 @@ type StatusColumn = {
   id: number;
   title: string;
   tickets: KdsTicket[];
+  count: number;
 };
 
 type StatusInfo = { id: number; title: string };
@@ -53,24 +55,21 @@ const elapsedMin = (ms: number) =>
 export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [tickets, setTickets] = useState<KdsTicket[]>([]);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
   const [soundOn, setSoundOn] = useState(true);
   const bellRef = useRef<HTMLAudioElement | null>(null);
 
   const [station, setStation] = useState<number>(0);
   const [stations, setStations] = useState<any[]>([]);
-  const [gHash, setGHash] = useState<string>("");
-  const [userId, setUserId] = useState<string>("");
 
   const [statuses, setStatuses] = useState<StatusInfo[]>([]);
 
   const { t } = useI18n(lang);
 
-  useEffect(() => {
-    const storedHash = localStorage.getItem("g_hash") || "";
-    const storedUser = localStorage.getItem("user_id") || "";
-    setGHash(storedHash);
-    setUserId(storedUser);
-  }, []);
+  const auth = useAppSelector((s) => s.auth.loginData);
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
 
   const [dragItem, setDragItem] = useState<{
     ticketId: number;
@@ -80,9 +79,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     async function loadStations() {
       try {
-        const g_hash = localStorage.getItem("g_hash");
-        const user_id = localStorage.getItem("user_id");
-
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getstationsname`;
         const res = await api.get(url, { params: { g_hash, user_id } });
 
@@ -103,9 +99,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     async function loadStatuses() {
       try {
-        const g_hash = localStorage.getItem("g_hash");
-        const user_id = localStorage.getItem("user_id");
-
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/inventory/getlistkitchenstatuses`;
         const res = await api.get(url, { params: { g_hash, user_id } });
 
@@ -115,7 +108,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
             list.map((s: any) => ({
               id: Number(s.ss_id),
               title: String(s.ss_status_title),
-            }))
+            })),
           );
         } else {
           console.warn("Error loading statuses:", res.data.error_msg);
@@ -130,17 +123,14 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
     loadStatuses();
   }, []);
 
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) forceLogout("You are not logged in. Please login.");
-  }, []);
+  // useEffect(() => {
+  //   const token = localStorage.getItem("access_token");
+  //   if (!token) forceLogout("You are not logged in. Please login.");
+  // }, []);
 
   useEffect(() => {
     async function loadPendingOrders() {
       try {
-        const g_hash = localStorage.getItem("g_hash");
-        const user_id = localStorage.getItem("user_id");
-
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getpendingorders`;
         const res = await api.get(url, { params: { g_hash, user_id } });
 
@@ -157,8 +147,8 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
             o.fo_order_type === "dine_in"
               ? "Dine-in"
               : o.fo_order_type === "takeaway"
-              ? "Takeaway"
-              : "Delivery",
+                ? "Takeaway"
+                : "Delivery",
           createdAt: o.fo_creation_date
             ? new Date(o.fo_creation_date).getTime()
             : Date.now(),
@@ -183,41 +173,69 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   }, []);
 
   const columns = useMemo<StatusColumn[]>(() => {
-    if (!statuses.length) {
-      return [
-        { id: -1, title: "Statuses…", tickets: [] },
-        { id: -2, title: "Statuses…", tickets: [] },
-        { id: -3, title: "Statuses…", tickets: [] },
-      ];
-    }
+    if (!statuses.length) return [];
 
-    return statuses.map((st) => {
-      const ticketsInStatus: KdsTicket[] = [];
+    const q = debouncedQuery.toLowerCase()
+    const result: Record<number, KdsTicket[]> = {};
 
-      tickets.forEach((ticket) => {
-        const hasItemInThisStatus = ticket.items.some(
-          (item) =>
-            item.statusId === st.id &&
-            (station === 0 || item.station === station)
-        );
+    statuses.forEach((st) => (result[st.id] = []));
 
-        if (hasItemInThisStatus) ticketsInStatus.push(ticket);
+    for (const ticket of tickets) {
+      if (
+        q !== "" &&
+        !ticket.orderCode.toLowerCase().includes(q) &&
+        !(ticket.table ?? "").toLowerCase().includes(q)
+      )
+        continue;
+
+      const relevantItems = ticket.items.filter(
+        (item) => station === 0 || item.station === station,
+      );
+
+      if (relevantItems.length === 0) continue;
+
+      const itemsByStatus = new Map<number, KdsItem[]>();
+      relevantItems.forEach((item) => {
+        if (!itemsByStatus.has(item.statusId)) {
+          itemsByStatus.set(item.statusId, []);
+        }
+        itemsByStatus.get(item.statusId)!.push(item);
       });
 
-      return { id: st.id, title: st.title, tickets: ticketsInStatus };
+      itemsByStatus.forEach((items, statusId) => {
+        if (result[statusId]) {
+          result[statusId].push({
+            ...ticket,
+            items,
+          });
+        }
+      });
+    }
+
+    // CALCULATE COUNT HERE - ONCE
+    return statuses.map((st) => {
+      const tickets = result[st.id] || [];
+      const count = tickets.reduce((sum, t) => sum + t.items.length, 0);
+
+      return {
+        id: st.id,
+        title: st.title,
+        tickets,
+        count, // Pre-calculated
+      };
     });
-  }, [statuses, tickets, station]);
+  }, [statuses, tickets, debouncedQuery, station]);
 
   const toggleHold = (ticketId: number) =>
     setTickets((prev) =>
-      prev.map((t) => (t.id === ticketId ? { ...t, hold: !t.hold } : t))
+      prev.map((t) => (t.id === ticketId ? { ...t, hold: !t.hold } : t)),
     );
 
   const moveItemToStatus = async (
     ticketId: number,
     itemId: string,
     newStatusId: number,
-    newStatusTitle: string
+    newStatusTitle: string,
   ) => {
     setTickets((prev) =>
       prev.map((t) => {
@@ -227,19 +245,21 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           items: t.items.map((it) =>
             it.id === itemId
               ? { ...it, statusId: newStatusId, statusTitle: newStatusTitle }
-              : it
+              : it,
           ),
         };
-      })
+      }),
     );
 
     try {
       const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/updatekitchenstatus`;
-      if (!gHash || !userId) return;
+      if (!g_hash || !user_id) {
+        return;
+      }
 
       await api.post(url, {
-        g_hash: gHash,
-        user_id: userId,
+        g_hash,
+        user_id,
         oi_id: itemId,
         oi_kitchen_status: newStatusId,
       });
@@ -251,6 +271,13 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const laneCls =
     "min-h-[60vh] w-full rounded-3xl bg-white/80 backdrop-blur-xl ring-1 ring-white/60 shadow-sm p-3";
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [query]);
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
       <audio
@@ -336,21 +363,14 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                   dragItem.ticketId,
                   dragItem.itemId,
                   col.id,
-                  col.title
+                  col.title,
                 );
                 setDragItem(null);
               }}
             >
               <LaneHeader
                 title={col.title}
-                count={col.tickets.reduce((sum, ticket) => {
-                  const itemsInCol = ticket.items.filter(
-                    (i) =>
-                      i.statusId === col.id &&
-                      (station === 0 || i.station === station)
-                  );
-                  return sum + itemsInCol.length;
-                }, 0)}
+                count={col.count}
                 color="bg-amber-100 text-amber-800"
               />
 
@@ -359,8 +379,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                   <TicketCard
                     key={`${t.id}-${col.id}`}
                     t={t}
-                    statusId={col.id}
-                    stationFilter={station}
                     onHold={() => toggleHold(t.id)}
                     onItemDragStart={(itemId) =>
                       setDragItem({ ticketId: t.id, itemId })
@@ -411,35 +429,26 @@ function EmptyHint({ text }: { text: string }) {
   );
 }
 
-function TicketCard({
+const TicketCard = memo(function TicketCard({
   t,
-  statusId,
-  stationFilter,
   onHold,
   onItemDragStart,
 }: {
   t: KdsTicket;
-  statusId: number;
-  stationFilter: number;
   onHold: () => void;
   onItemDragStart: (itemId: string) => void;
 }) {
-  const itemsInThisColumn = t.items.filter(
-    (i) =>
-      i.statusId === statusId &&
-      (stationFilter === 0 || i.station === stationFilter)
-  );
+  const itemsInThisColumn = t.items;
 
   if (itemsInThisColumn.length === 0) return null;
 
   const mins = elapsedMin(t.createdAt);
-
   const toneCls =
     mins >= 20
       ? "bg-red-100 text-red-800 ring-red-200"
       : mins >= 10
-      ? "bg-amber-100 text-amber-800 ring-amber-200"
-      : "bg-emerald-100 text-emerald-800 ring-emerald-200";
+        ? "bg-amber-100 text-amber-800 ring-amber-200"
+        : "bg-emerald-100 text-emerald-800 ring-emerald-200";
 
   const totalQtyInColumn = itemsInThisColumn.reduce((s, i) => s + i.qty, 0);
 
@@ -520,4 +529,4 @@ function TicketCard({
       </div>
     </div>
   );
-}
+});

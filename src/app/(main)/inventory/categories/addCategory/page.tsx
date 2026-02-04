@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import axios from "axios";
 import { ArrowLeft, Save } from "lucide-react";
+import { useAppSelector } from "@/store/hooks";
 
 type FormErrors = {
   pc_category?: string;
@@ -17,6 +18,11 @@ export default function AddCategoryPage() {
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
+
+  const auth = useAppSelector((s) => s.auth.loginData);
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+
 
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
@@ -36,9 +42,6 @@ export default function AddCategoryPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
-
-    const user_id = Number(localStorage.getItem("user_id"));
-    const g_hash = localStorage.getItem("g_hash");
 
     if (!user_id || !g_hash) {
       setErrors({

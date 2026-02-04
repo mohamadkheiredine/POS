@@ -23,6 +23,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { useAppSelector } from "@/store/hooks";
 
 type UID = string;
 type UOM = "kg" | "g" | "L" | "ml" | "pcs";
@@ -82,36 +83,44 @@ const LOCATIONS: Location[] = [
   "Freezer",
 ];
 
-function getAuthPayload() {
-  return {
-    user_id: Number(localStorage.getItem("user_id") || "0"),
-    warehouse_id: Number(localStorage.getItem("warehouse_id") || "0"),
-    g_hash: localStorage.getItem("g_hash") || "",
-  };
-}
-
-async function apiGetProducts(fk_pc_id?: number) {
-  const { user_id, warehouse_id, g_hash } = getAuthPayload();
-
+async function apiGetProducts(
+  user_id: string | null,
+  warehouse_id: string | null,
+  g_hash: string | null,
+  fk_pc_id?: number,
+) {
   const res = await axios.get(
     process.env.NEXT_PUBLIC_API_LINK + "/api/products/getproducts",
     {
-      params: { user_id, warehouse_id, g_hash, fk_pc_id },
-    }
+      params: {
+        user_id,
+        warehouse_id,
+        g_hash,
+        fk_pc_id,
+      },
+    },
   );
 
   return res.data;
 }
 
-async function apiGetLotsByProductId(product_id: number) {
-  const { user_id, warehouse_id, g_hash } = getAuthPayload();
-
+async function apiGetLotsByProductId(
+  user_id: string | null,
+  warehouse_id: string | null,
+  g_hash: string | null,
+  product_id: number,
+) {
   const res = await axios.get(
     process.env.NEXT_PUBLIC_API_LINK +
       "/api/products/getproductlotsbyproductid",
     {
-      params: { user_id, product_id, warehouse_id, g_hash },
-    }
+      params: {
+        user_id,
+        warehouse_id,
+        g_hash,
+        product_id,
+      },
+    },
   );
 
   return res.data;
@@ -152,6 +161,10 @@ export default function InventoryItemsPage() {
   }>({ open: false });
 
   const pageSize = 8;
+  const auth = useAppSelector((s) => s.auth.loginData);
+  const g_hash = auth.g_hash;
+  const user_id = auth.user_id;
+  const warehouse_id = auth.warehouse_id;
 
   /* Categories (FIXED) */
   const categories = useMemo(() => {
@@ -161,6 +174,8 @@ export default function InventoryItemsPage() {
   }, [items]);
 
   useEffect(() => {
+    if (!g_hash || !user_id || !warehouse_id) return;
+
     let mounted = true;
 
     (async () => {
@@ -168,7 +183,13 @@ export default function InventoryItemsPage() {
         setLoading(true);
         setErrorMsg("");
 
-        const data = await apiGetProducts(categoryId);
+        const data = await apiGetProducts(
+          user_id,
+          warehouse_id,
+          g_hash,
+          categoryId,
+        );
+
         if (data?.is_error) {
           setErrorMsg(data.error_message);
           return;
@@ -219,7 +240,7 @@ export default function InventoryItemsPage() {
       const low = it.onHand <= it.reorderPoint && it.onHand > 0;
       const out = it.onHand <= 0;
       const expiring = it.lots.some(
-        (l) => (dateDiffDays(l.expiry) ?? 9999) <= 5
+        (l) => (dateDiffDays(l.expiry) ?? 9999) <= 5,
       );
       const over = it.onHand > it.reorderPoint * 4 && it.reorderPoint > 0;
 
@@ -238,7 +259,7 @@ export default function InventoryItemsPage() {
 
   const pageItems = useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
-    [filtered, page]
+    [filtered, page],
   );
 
   const toggleSel = (id: string, v: boolean) =>
@@ -296,7 +317,13 @@ export default function InventoryItemsPage() {
 
     try {
       if (item.lots.length === 0) {
-        const data = await apiGetLotsByProductId(Number(item.id));
+        const data = await apiGetLotsByProductId(
+          user_id,
+          warehouse_id,
+          g_hash,
+          Number(item.id),
+        );
+
         if (data?.is_error) return;
 
         const mappedLots: Lot[] = (data.lots || []).map((l: any): Lot => {
@@ -331,8 +358,8 @@ export default function InventoryItemsPage() {
                   lots: mappedLots,
                   onHand: mappedLots.reduce((s, l) => s + l.qty, 0),
                 }
-              : it
-          )
+              : it,
+          ),
         );
       }
 
@@ -345,7 +372,7 @@ export default function InventoryItemsPage() {
 
   const drawerItem = useMemo(
     () => items.find((i) => i.id === drawer.itemId) || null,
-    [drawer.itemId, items]
+    [drawer.itemId, items],
   );
 
   const openTransfer = (item: InventoryItem, lotId?: string) => {
@@ -380,7 +407,7 @@ export default function InventoryItemsPage() {
 
         it.onHand = newTotal;
         return { ...it };
-      })
+      }),
     );
   };
 
@@ -388,7 +415,7 @@ export default function InventoryItemsPage() {
     itemId: string,
     lotId: string,
     to: Location,
-    qty: number
+    qty: number,
   ) => {
     setItems((arr) =>
       arr.map((it) => {
@@ -404,7 +431,7 @@ export default function InventoryItemsPage() {
             l.code === lot.code &&
             l.location === to &&
             l.unitCost === lot.unitCost &&
-            l.expiry === lot.expiry
+            l.expiry === lot.expiry,
         );
 
         if (existing) {
@@ -426,7 +453,7 @@ export default function InventoryItemsPage() {
         it.onHand = Number(it.lots.reduce((s, l) => s + l.qty, 0).toFixed(3));
 
         return { ...it };
-      })
+      }),
     );
   };
 
@@ -559,7 +586,7 @@ export default function InventoryItemsPage() {
                 const low = it.onHand <= it.reorderPoint && it.onHand > 0;
                 const out = it.onHand <= 0;
                 const expSoon = it.lots.some(
-                  (l) => (dateDiffDays(l.expiry) ?? 9999) <= 5
+                  (l) => (dateDiffDays(l.expiry) ?? 9999) <= 5,
                 );
 
                 return (
@@ -787,10 +814,10 @@ function LotsDrawer({
               d === undefined
                 ? "text-gray-700"
                 : d <= 0
-                ? "text-rose-700 font-semibold"
-                : d <= 5
-                ? "text-amber-700 font-semibold"
-                : "text-gray-700";
+                  ? "text-rose-700 font-semibold"
+                  : d <= 5
+                    ? "text-amber-700 font-semibold"
+                    : "text-gray-700";
 
             return (
               <div
@@ -886,7 +913,7 @@ function TransferModal({
   onTransfer: (lotId: string, to: Location, qty: number) => void;
 }) {
   const [targetLot, setTargetLot] = useState<string>(
-    lotId || item.lots[0]?.id || ""
+    lotId || item.lots[0]?.id || "",
   );
   const [to, setTo] = useState<Location>("Kitchen");
   const [qty, setQty] = useState<number>(0);
