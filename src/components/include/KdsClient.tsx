@@ -64,6 +64,9 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [stations, setStations] = useState<any[]>([]);
 
   const [statuses, setStatuses] = useState<StatusInfo[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
 
   const { t } = useI18n(lang);
 
@@ -80,7 +83,14 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
     async function loadStations() {
       try {
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getstationsname`;
-        const res = await api.get(url, { params: { g_hash, user_id } });
+        const res = await api.get(url, {
+          params: {
+            g_hash,
+            user_id,
+            page,
+            per_page: 50,
+          },
+        });
 
         if (!res.data.is_error) {
           setStations(res.data.lst_kitchens || []);
@@ -129,19 +139,39 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   // }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
     async function loadPendingOrders() {
       try {
         const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getpendingorders`;
-        const res = await api.get(url, { params: { g_hash, user_id } });
 
-        if (res.data.is_error) return;
+        const res = await api.get(url, {
+          params: {
+            g_hash,
+            user_id,
+            page,
+            per_page: 50,
+
+            station_id: station === 0 ? undefined : station,
+            q: debouncedQuery?.trim() ? debouncedQuery.trim() : undefined,
+          },
+          // if i abort, cancel this request
+          signal: controller.signal,
+        });
+
+        if (cancelled || res.data.is_error) {
+          return;
+        }
 
         const orders = res.data.lst_pending_orders || [];
 
         const mappedTickets: KdsTicket[] = orders.map((o: any) => ({
           id: Number(o.fo_id),
           orderCode: String(o.fo_order_code || ""),
-          orderDate: String(o.fo_creation_date || o.fo_created_at || ""),
+          orderDate: String(
+            o.fo_order_datetime || o.fo_creation_date || o.fo_created_at || "",
+          ),
           table: o.fo_table_id ? `T${o.fo_table_id}` : undefined,
           channel:
             o.fo_order_type === "dine_in"
@@ -149,9 +179,11 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
               : o.fo_order_type === "takeaway"
                 ? "Takeaway"
                 : "Delivery",
-          createdAt: o.fo_creation_date
-            ? new Date(o.fo_creation_date).getTime()
-            : Date.now(),
+          createdAt: o.fo_order_datetime
+            ? new Date(o.fo_order_datetime).getTime()
+            : o.fo_creation_date
+              ? new Date(o.fo_creation_date).getTime()
+              : Date.now(),
           items: (o.items || []).map((i: any) => ({
             id: String(i.oi_id),
             name: String(i.mi_item_name || ""),
@@ -164,64 +196,89 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
         }));
 
         setTickets(mappedTickets);
-      } catch (err) {
+
+        const pagination = res.data.pagination;
+        if (pagination) {
+          setHasMore(Number(pagination.page) < Number(pagination.total_pages));
+          setTotalPages(Number(pagination.total_pages));
+        } else {
+          setHasMore(mappedTickets.length > 0);
+        }
+      } catch (err: any) {
+        if (err?.name === "CanceledError") return;
         console.error("Failed to load pending orders", err);
       }
     }
 
     loadPendingOrders();
-  }, []);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [g_hash, user_id, page, station, debouncedQuery]);
 
   const columns = useMemo<StatusColumn[]>(() => {
     if (!statuses.length) return [];
 
-    const q = debouncedQuery.toLowerCase()
-    const result: Record<number, KdsTicket[]> = {};
+    const q = debouncedQuery.toLowerCase();
 
+    //filter tickets
+    const filtered = tickets.filter((t) => {
+      if (q) {
+        const match =
+          t.orderCode.toLowerCase().includes(q) ||
+          (t.table ?? "").toLowerCase().includes(q);
+
+        if (!match) return false;
+      }
+
+      // station filter
+      if (station !== 0) {
+        return t.items.some((i) => i.station === station);
+      }
+
+      return true;
+    });
+
+    //group only filtered
+    const result: Record<number, KdsTicket[]> = {};
     statuses.forEach((st) => (result[st.id] = []));
 
-    for (const ticket of tickets) {
-      if (
-        q !== "" &&
-        !ticket.orderCode.toLowerCase().includes(q) &&
-        !(ticket.table ?? "").toLowerCase().includes(q)
-      )
-        continue;
+    for (const ticket of filtered) {
+      const relevantItems =
+        station === 0
+          ? ticket.items
+          : ticket.items.filter((i) => i.station === station);
 
-      const relevantItems = ticket.items.filter(
-        (item) => station === 0 || item.station === station,
-      );
+      if (!relevantItems.length) continue;
 
-      if (relevantItems.length === 0) continue;
+      const byStatus: Record<number, KdsItem[]> = {};
 
-      const itemsByStatus = new Map<number, KdsItem[]>();
-      relevantItems.forEach((item) => {
-        if (!itemsByStatus.has(item.statusId)) {
-          itemsByStatus.set(item.statusId, []);
-        }
-        itemsByStatus.get(item.statusId)!.push(item);
-      });
+      for (const it of relevantItems) {
+        if (!byStatus[it.statusId]) byStatus[it.statusId] = [];
+        byStatus[it.statusId].push(it);
+      }
 
-      itemsByStatus.forEach((items, statusId) => {
-        if (result[statusId]) {
-          result[statusId].push({
-            ...ticket,
-            items,
-          });
-        }
-      });
+      for (const [statusId, items] of Object.entries(byStatus)) {
+        const sid = Number(statusId);
+
+        result[sid].push({
+          ...ticket,
+          items,
+        });
+      }
     }
 
-    // CALCULATE COUNT HERE - ONCE
     return statuses.map((st) => {
       const tickets = result[st.id] || [];
-      const count = tickets.reduce((sum, t) => sum + t.items.length, 0);
+      const count = tickets.reduce((s, t) => s + t.items.length, 0);
 
       return {
         id: st.id,
         title: st.title,
         tickets,
-        count, // Pre-calculated
+        count,
       };
     });
   }, [statuses, tickets, debouncedQuery, station]);
@@ -253,16 +310,35 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
 
     try {
       const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/updatekitchenstatus`;
-      if (!g_hash || !user_id) {
-        return;
-      }
 
-      await api.post(url, {
+      const res = await api.post(url, {
         g_hash,
         user_id,
         oi_id: itemId,
         oi_kitchen_status: newStatusId,
       });
+
+      if (res.data?.is_error) {
+        return;
+      }
+      
+      if (res.data?.is_closed) {
+        setTickets(
+          (prev) =>
+            prev
+              .map((t) => {
+                if (t.id !== ticketId) return t;
+
+                const remaining = t.items.filter((it) => it.id !== itemId);
+
+                return remaining.length === 0
+                  ? null
+                  : { ...t, items: remaining };
+              })
+              .filter(Boolean) as KdsTicket[],
+        );
+      }
+      refillCurrentPage();
     } catch (err) {
       console.error("Failed to update kitchen status", err);
     }
@@ -274,10 +350,56 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(query);
-    }, 300);
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    setTickets([]);
+    setPage(1);
+    setHasMore(true);
+  }, [station, debouncedQuery]);
+
+  const refillCurrentPage = async () => {
+    try {
+      const url = `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/getpendingorders`;
+
+      const res = await api.get(url, {
+        params: {
+          g_hash,
+          user_id,
+          page,
+          per_page: 10, // same as backend
+          station_id: station === 0 ? undefined : station,
+          q: debouncedQuery?.trim() ? debouncedQuery.trim() : undefined,
+        },
+      });
+
+      if (res.data.is_error) return;
+
+      const orders = res.data.lst_pending_orders || [];
+
+      const mapped = orders.map((o: any) => ({
+        id: Number(o.fo_id),
+        orderCode: String(o.fo_order_code || ""),
+        orderDate: String(o.fo_order_datetime || ""),
+        items: (o.items || []).map((i: any) => ({
+          id: String(i.oi_id),
+          name: String(i.mi_item_name || ""),
+          qty: Number(i.oi_quantity || 0),
+          station: Number(i.oi_station_id || 0),
+          statusId: Number(i.oi_kitchen_status || 0),
+          statusTitle: String(i.ss_status_title || ""),
+        })),
+      }));
+
+      setTickets(mapped);
+    } catch (e) {
+      console.error("Refill failed", e);
+    }
+  };
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
       <audio
@@ -393,6 +515,28 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
             </div>
           ))}
         </div>
+
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="rounded-xl border bg-white px-3 py-2 text-sm disabled:opacity-40"
+          >
+            ← Prev
+          </button>
+
+          <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm font-semibold">
+            Page {page} / {totalPages}
+          </div>
+
+          <button
+            disabled={!hasMore}
+            onClick={() => setPage((p) => p + 1)}
+            className="rounded-xl border bg-white px-3 py-2 text-sm disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -402,7 +546,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
  * Components
  * ───────────────────────────────────────── */
 
-function LaneHeader({
+const LaneHeader = memo(function LaneHeader({
   title,
   count,
   color,
@@ -419,7 +563,7 @@ function LaneHeader({
       </span>
     </div>
   );
-}
+});
 
 function EmptyHint({ text }: { text: string }) {
   return (

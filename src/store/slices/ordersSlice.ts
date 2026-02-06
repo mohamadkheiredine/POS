@@ -5,6 +5,7 @@ export type LocalOrder = {
   tableIds: number[];
   items: OrderItem[];
   isHeld?: boolean;
+  isPaid?: boolean;
   customer?: any;
   mergedMeta?: {
     primaryTable: number;
@@ -53,6 +54,7 @@ export const createEmptyOrder = (id: string): LocalOrder => ({
   checkoutDraft: false,
 
   isHeld: false,
+  isPaid: false,
 });
 
 const initialState: OrdersState = {

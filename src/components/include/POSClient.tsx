@@ -38,6 +38,7 @@ import {
   upsertOrder,
 } from "@/store/slices/ordersSlice";
 import { updateLoginStringField } from "@/store/slices/authSlice";
+import { store } from "@/store";
 
 /* =============================================================================
  * Types
@@ -95,6 +96,7 @@ type LocalOrder = {
   tableIds: number[];
   items: OrderItem[];
   isHeld?: boolean;
+  isPaid?: boolean;
 
   mergedMeta?: {
     primaryTable: number;
@@ -115,7 +117,6 @@ type KitchenStationDB = {
   ks_id: number;
   ks_name: string;
 };
-
 
 /* =============================================================================
  * Helpers
@@ -693,15 +694,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (menu.length === 0) return;
     if (hydrated) return;
 
-    console.log("🔄 Restoration check", {
-      ordersLoaded,
-      menuCount: menu.length,
-      ordersCount: ordersInfo?.length || 0,
-    });
-
     //Check if ordersInfo exists and is an array
     if (!ordersInfo || !Array.isArray(ordersInfo) || ordersInfo.length === 0) {
-      console.log("⚠️ No orders to restore");
       setHydrated(true);
       setHydrating(false);
       return;
@@ -711,7 +705,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     let orderToRestore: LocalOrder | null = null;
 
-    //Exact last active order
+    //exact last active order
     if (lastActiveId) {
       const last = ordersInfo.find(
         (o) => o?.orderId === lastActiveId && !o?.isHeld,
@@ -721,7 +715,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       }
     }
 
-    //unfinished takeaway checkout - WITH SAFE ARRAY CHECKS
+    //unfinished takeaway checkout
     if (!orderToRestore) {
       orderToRestore =
         ordersInfo.find(
@@ -732,12 +726,12 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             o.tableIds[0] === 0 &&
             Array.isArray(o?.items) &&
             o.items.length > 0 &&
-            !o?.isHeld,
+            !o?.isHeld &&
+            o?.isPaid !== true,
         ) ?? null;
-
     }
 
-    //any takeaway with items - WITH SAFE ARRAY CHECKS
+    //any takeaway with items
     if (!orderToRestore) {
       orderToRestore =
         ordersInfo.find(
@@ -749,10 +743,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             o.items.length > 0 &&
             !o?.isHeld,
         ) ?? null;
-
     }
 
-    //any dine-in with items - WITH SAFE ARRAY CHECKS
+    //any dine-in with items
     if (!orderToRestore) {
       orderToRestore =
         ordersInfo.find(
@@ -766,24 +759,29 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         ) ?? null;
     }
 
+    if (
+      !orderToRestore ||
+      !Array.isArray(orderToRestore.items) ||
+      orderToRestore.items.length === 0 ||
+      orderToRestore.isPaid === true
+    ) {
+      setHydrated(true);
+      setHydrating(false);
+      return;
+    }
+
     if (!orderToRestore) {
       setHydrated(true);
       setHydrating(false);
       return;
     }
 
-    // CRITICAL: Safely get tableId with fallback
+    //get tableId with fallback
     const tableId =
       Array.isArray(orderToRestore.tableIds) &&
       orderToRestore.tableIds.length > 0
         ? orderToRestore.tableIds[0]
         : 0;
-
-    console.log("🎯 Restoring order:", {
-      orderId: orderToRestore.orderId,
-      tableId,
-      itemsCount: orderToRestore.items?.length || 0,
-    });
 
     // Set current order ID and table
     setCurrentOrderId(orderToRestore.orderId);
@@ -1031,6 +1029,45 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }
 
   const selectTable = async (table: Table) => {
+    // kabasna 3l table that is already open y3ne second click
+    if (!mergeMode && !transferMode && currentTableId === table.id) {
+      // takeaway order
+      const takeaway = ordersInfo.find(
+        (o) => o.tableIds?.[0] === 0 && o.items?.length > 0 && !o.isHeld,
+      );
+
+      if (takeaway) {
+        setCurrentOrderId(takeaway.orderId);
+        // bs nghayer l table id to null y3ne rj3na lal takeaway order
+        setCurrentTableId(null);
+
+        setOrder({
+          id: takeaway.orderId,
+          guests: 0,
+          items: takeaway.items,
+          createdAt: Date.now(),
+          status: "open",
+        });
+
+        applyCustomerToUI(takeaway.customer ?? null);
+        return;
+      }
+
+      // if no takeaway just deactivate table view
+      setCurrentTableId(null);
+      setCurrentOrderId(null);
+
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+
+      return;
+    }
+
     if (!mergeMode && currentTableId === table.id) {
       return;
     }
@@ -1102,8 +1139,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     );
 
     if (held) {
-      console.log("🔓 Restoring held order:", held.orderId);
-
       dispatch(
         upsertOrder({
           ...held,
@@ -1186,12 +1221,16 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     applyCustomerToUI(null);
     setTakeawayPreview(false);
 
+    const isTakeaway = table.id === 0;
+    const orderType = isTakeaway ? "takeaway" : "dine_in";
+
     api
       .post(API_URL + "/api/orders/createemptyorder", {
         g_hash,
         user_id,
         store_id,
         company_id,
+        order_type: orderType,
       })
       .then((res) => {
         if (res.data?.is_error) return;
@@ -1429,61 +1468,161 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     setModItem(null);
   };
 
-  const sendToKitchen = async () => {
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
-
-    if (!orderData) return alert("Order not found");
-
-    if (!g_hash || !user_id) {
-      return alert("Missing auth");
+  async function ensureRealOrderId(): Promise<string> {
+    // already real numeric id
+    if (currentOrderId && !String(currentOrderId).startsWith("tmp_")) {
+      return String(currentOrderId);
     }
 
-    const payload = {
+    const tableKey = currentTableId ? Number(currentTableId) : 0;
+    const isTakeaway = tableKey === 0;
+    const orderType = isTakeaway ? "takeaway" : "dine_in";
+
+    // create order id
+    const res = await api.post(API_URL + "/api/orders/createemptyorder", {
       g_hash,
       user_id,
-      customer_id: 0,
+      store_id,
+      company_id,
+      order_type: orderType,
+    });
 
-      order_id: currentOrderId,
-      order_type: "dine_in",
-      table_ids: orderData.tableIds.join(","),
+    if (res.data?.is_error) {
+      throw new Error(res.data?.error_msg || "Failed to create order");
+    }
 
-      sub_total: subtotalOriginal,
+    const realOrderId = String(res.data.order_id);
 
-      discount: 0,
-      total: totalOriginal,
+    // if we had a tmp id in redux, replace it
+    if (currentOrderId && String(currentOrderId).startsWith("tmp_")) {
+      dispatch(replaceOrderId({ tempId: currentOrderId, realId: realOrderId }));
+    }
 
-      order_items: JSON.stringify(
-        orderData.items.map((li) => ({
-          item_id: li.itemId,
-          quantity: li.qty,
-          unit_price: li.basePrice + li.priceExtra,
-          discount: 0,
-          station_id: li.stationId,
-          notes: li.note || "",
-          modifiers: li.modifiers.map((m: any) => ({
-            id: Number(m.optionId),
-          })),
-        })),
-      ),
-    };
+    setCurrentOrderId(realOrderId);
+    setOrder((o: any) => ({ ...o, id: realOrderId }));
 
+    const last = localStorage.getItem("last_active_order_id");
+    if (last && last === currentOrderId) {
+      localStorage.setItem("last_active_order_id", realOrderId);
+    }
+
+    return realOrderId;
+  }
+
+  const sendToKitchen = async () => {
     try {
+      const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+
+      if (!orderData) {
+        return alert("Order not found");
+      }
+      if (!g_hash || !user_id) {
+        return alert("Missing auth");
+      }
+      const newItems = orderData.items.filter((i) => !i.sentToKitchen);
+
+      if (newItems.length === 0) {
+        alert("This order was already sent to kitchen");
+        return;
+      }
+
+      //make sure we have REAL order id for dine-in AND takeaway
+      const realOrderId = await ensureRealOrderId();
+
+      const isTakeaway = !currentTableId; // null => takeaway
+      const orderType = isTakeaway ? "takeaway" : "dine_in";
+
+      const payload = {
+        g_hash,
+        user_id,
+        customer_id: selectedCustomer?.customer_id ?? 0,
+
+        order_id: Number(realOrderId),
+        order_type: orderType,
+
+        // for takeaway send "0"
+        table_ids: (orderData.tableIds?.length ? orderData.tableIds : [0]).join(
+          ",",
+        ),
+
+        sub_total: subtotalOriginal,
+        discount: 0,
+        total: totalOriginal,
+
+        order_items: JSON.stringify(
+          newItems.map((li) => ({
+            item_id: li.itemId,
+            quantity: li.qty,
+            unit_price: li.basePrice + li.priceExtra,
+            discount: 0,
+            station_id: li.stationId,
+            notes: li.note || "",
+            modifiers: (li.modifiers ?? []).map((m: any) => ({
+              id: Number(m.optionId),
+            })),
+          })),
+        ),
+      };
+
       const res = await axios.post(
         API_URL + "/api/orders/updateorder",
         payload,
       );
 
-      if (res.data.is_error) {
+      if (res.data?.is_error) {
         alert(res.data.error_msg);
         return;
       }
 
-      alert("Order sent to kitchen (print queued)");
+      // Mark items as sent for BOTH types
+      const updatedItems = orderData.items.map((x) =>
+        !x.sentToKitchen ? { ...x, sentToKitchen: true } : x,
+      );
+
+      dispatch(
+        updateOrderItems({
+          id: String(realOrderId),
+          items: updatedItems,
+        }),
+      );
+
+      // only clear UI for dine-in
+      if (!isTakeaway) {
+        // dine-in reset only
+        setOrder({
+          id: uid(),
+          guests: 0,
+          items: [],
+          createdAt: Date.now(),
+          status: "open",
+        });
+      } else {
+        setOrder((prev: any) => ({
+          ...prev,
+          id: realOrderId,
+          items: updatedItems,
+        }));
+
+        setCurrentTableId(null);
+        setCurrentOrderId(realOrderId);
+      }
+      // takeaway stays visible
+
+      if (!isTakeaway) {
+        // dine-in: close ticket ui after sending
+        setCurrentTableId(null);
+        setCurrentOrderId(null);
+      } else {
+        // takeaway: keep showing the same order
+        setCurrentTableId(null); // keep takeaway mode
+        setCurrentOrderId(realOrderId); // keep current order id
+      }
 
       alert("Order sent to kitchen");
-      setCurrentTableId(null);
-      setCurrentOrderId(null);
-    } catch (error) {}
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Send to kitchen failed");
+    }
   };
 
   /* -------------------- edit line -------------------- */
@@ -1499,6 +1638,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const it: any = menu.find((m) => m.id === editLine.itemId);
     const extra = priceFromModifiers(it?.modifierGroups, editLine.modifiers);
     const updated = { ...editLine, priceExtra: extra };
+
+    setOrder((prev: any) => ({
+      ...prev,
+      items: prev.items.map((x: any) => (x.uid === updated.uid ? updated : x)),
+    }));
 
     const order = ordersInfo.find((o) => o.orderId === currentOrderId);
 
@@ -1533,8 +1677,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   const itemsForCurrentTable = useMemo(() => {
-    return order.items;
-  }, [order.items]);
+    if (!currentOrderId) return [];
+
+    const info = ordersInfo.find((o) => o.orderId === currentOrderId);
+    return info?.items ?? [];
+  }, [ordersInfo, currentOrderId]);
 
   const saveOrderToDatabase = async (finalCustomerId?: number) => {
     // sync edited order
@@ -1646,13 +1793,11 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
     const displayCurrencyId = selectedCur?.currencyId;
 
-    const dineInOrderId =
-      currentOrderId && !String(currentOrderId).startsWith("tmp_")
-        ? Number(currentOrderId)
-        : null;
+    const realOrderId = await ensureRealOrderId();
 
     const payload = {
-      order_id: orderType === "dine_in" ? dineInOrderId : null,
+      // order_id: orderType === "dine_in" ? dineInOrderId : null,
+      order_id: Number(realOrderId),
       g_hash,
       warehouse_id,
       user_id,
@@ -1700,12 +1845,29 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       setReceiptHTML(response.data.receipt_html);
     }
 
-    if (!editingOrderId) {
-      dispatch(removeOrder(orderData.orderId));
-    }
+    //delete after pay&close
 
-    setEditingOrderId(null);
-    setEditDirty(false);
+    // the real id
+    const finalId = String(realOrderId);
+    dispatch(
+      upsertOrder({
+        ...orderData,
+        orderId: finalId,
+        isPaid: true,
+        checkoutDraft: false,
+      }),
+    );
+
+    // remove by real id
+    dispatch(removeOrder(finalId));
+
+    // clear persistence sources
+    localStorage.removeItem("last_active_order_id");
+    localStorage.removeItem("pos_held_order_snapshot");
+
+    //reset ui
+    setCurrentOrderId(null);
+    setCurrentTableId(null);
 
     setOrder({
       id: uid(),
@@ -1715,53 +1877,10 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       status: "open",
     });
 
-    // remove only the saved order
-    dispatch(removeOrder(orderData.orderId));
+    // clear customer
+    applyCustomerToUI(null);
 
-    // find remaining unfinished takeaway
-    const unfinishedTakeaway = ordersInfo.find(
-      (o) =>
-        o.orderId !== orderData.orderId && // not the order we just paid y3ne ignore the order l3mltela pay&close
-        o.tableIds?.[0] === 0 && // table 0 = takeaway
-        o.items?.length > 0 && // must contain items
-        !o.isHeld, // not a held order
-    );
-
-    if (unfinishedTakeaway) {
-      // restore takeaway
-      setCurrentOrderId(unfinishedTakeaway.orderId);
-      setCurrentTableId(null);
-
-      setOrder({
-        id: unfinishedTakeaway.orderId,
-        guests: 0,
-        items: unfinishedTakeaway.items,
-        createdAt: Date.now(),
-        status: "open",
-      });
-
-      applyCustomerToUI(unfinishedTakeaway.customer ?? null);
-
-      localStorage.setItem("last_active_order_id", unfinishedTakeaway.orderId);
-    } else {
-      // normal reset if no takeaway order exist
-      setCurrentOrderId(null);
-      setCurrentTableId(null);
-      localStorage.removeItem("last_active_order_id");
-
-      setOrder({
-        id: uid(),
-        guests: 0,
-        items: [],
-        createdAt: Date.now(),
-        status: "open",
-      });
-    }
-
-    setSelectedCustomer(null);
-    setCustomerName("");
-    setCustomerPhone("");
-    setCustomerAddress("");
+    return;
   };
 
   const printReceipt = () => {
@@ -2449,6 +2568,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                     li.basePrice + li.priceExtra,
                   );
                   const lineTotalDisplay = unitDisplay * li.qty;
+                  const isTakeawayNow = (tableId: number | null) => !tableId;
 
                   return (
                     <li
