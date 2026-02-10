@@ -64,10 +64,14 @@ export default function LoadOrderPopup({
   open,
   onClose,
   onLoadOrder,
+  g_hash,
+  user_id,
 }: {
   open: boolean;
   onClose: () => void;
   onLoadOrder: (payload: LoadOrderPayload) => void;
+  g_hash: string;
+  user_id: number;
 }) {
   const [orderCode, setOrderCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -84,8 +88,8 @@ export default function LoadOrderPopup({
         {
           params: {
             order_code: orderCode.trim(),
-            g_hash: localStorage.getItem("g_hash"),
-            user_id: localStorage.getItem("user_id"),
+            g_hash,
+            user_id,
           },
         },
       );

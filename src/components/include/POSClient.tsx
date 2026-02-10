@@ -3109,6 +3109,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
           open={loadOrderOpen}
           onClose={() => setLoadOrderOpen(false)}
           onLoadOrder={onLoadOrder}
+          g_hash={g_hash}
+          user_id={user_id}
         />
       )}
 

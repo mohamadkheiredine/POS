@@ -205,6 +205,11 @@ export default function MainLayout({
                 icon: <Package size={16} />,
               },
               {
+                href: "/inventory/waste",
+                label: "Wastes",
+                icon: <Package size={16} />,
+              },
+              {
                 href: "/inventory/recipes",
                 label: t.menu.recipes,
                 icon: <Tags size={16} />,
