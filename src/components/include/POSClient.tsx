@@ -598,6 +598,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }));
 
     dispatch(setMenuItems(mapped));
+    console.log("mapped ", mapped);
   };
 
   useEffect(() => {
