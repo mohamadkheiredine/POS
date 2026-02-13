@@ -71,6 +71,18 @@
     "noOrders": "No orders found…"
   },
 
+  "sellingItems": {
+    "title": "Selling Items",
+    "subtitle": "Menu items sold summary",
+    "itemName": "Item Name",
+    "category": "Category",
+    "qtySold": "Qty Sold",
+    "revenue": "Total Revenue",
+    "orders": "Number of Orders",
+    "loading": "Loading...",
+    "noItems": "No selling items found…"
+  },
+
   "kds": {
     "kitchenBoard": "Kitchen Board",
     "allKitchens": "All Kitchens"

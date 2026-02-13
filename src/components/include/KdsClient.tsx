@@ -19,6 +19,13 @@ import { useAppSelector } from "@/store/hooks";
  * Types
  * ───────────────────────────────────────── */
 
+type KdsModifier = {
+  modifier_id: number;
+  name: string;
+  price: number;
+  quantity: number;
+};
+
 type KdsItem = {
   id: string; // oi_id
   name: string; // mi_item_name
@@ -27,6 +34,7 @@ type KdsItem = {
   station: number; // oi_station_id
   statusId: number; // oi_kitchen_status (fk -> sys_status.ss_id)
   statusTitle: string; // sys_status.ss_status_title
+  modifiers: KdsModifier[];
 };
 
 type KdsTicket = {
@@ -192,6 +200,12 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
             station: Number(i.oi_station_id || 0),
             statusId: Number(i.oi_kitchen_status || 0),
             statusTitle: String(i.ss_status_title || "Pending"),
+            modifiers: (i.modifiers || []).map((m: any) => ({
+              modifier_id: Number(m.modifier_id),
+              name: String(m.name || ""),
+              price: Number(m.price || 0),
+              quantity: Number(m.quantity || 1),
+            })),
           })),
         }));
 
@@ -391,6 +405,12 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           station: Number(i.oi_station_id || 0),
           statusId: Number(i.oi_kitchen_status || 0),
           statusTitle: String(i.ss_status_title || ""),
+          modifiers: (i.modifiers || []).map((m: any) => ({
+            modifier_id: Number(m.modifier_id),
+            name: String(m.name || ""),
+            price: Number(m.price || 0),
+            quantity: Number(m.quantity || 1),
+          })),
         })),
       }));
 
@@ -639,8 +659,20 @@ const TicketCard = memo(function TicketCard({
                   {it.qty}× {it.name}
                 </span>
               </div>
+              {it.modifiers.length > 0 && (
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  {it.modifiers.map((mod) => (
+                    <span
+                      key={mod.modifier_id}
+                      className="inline-block rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-700"
+                    >
+                      + {mod.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {it.notes && (
-                <div className="text-xs text-gray-500">“{it.notes}”</div>
+                <div className="text-xs text-gray-500">&ldquo;{it.notes}&rdquo;</div>
               )}
             </div>
           </div>

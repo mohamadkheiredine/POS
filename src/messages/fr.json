@@ -71,6 +71,18 @@
     "noOrders": "Aucune commande trouvée…"
   },
 
+  "sellingItems": {
+    "title": "Articles vendus",
+    "subtitle": "Résumé des articles du menu vendus",
+    "itemName": "Nom de l'article",
+    "category": "Catégorie",
+    "qtySold": "Qté vendue",
+    "revenue": "Revenu",
+    "orders": "Commandes",
+    "loading": "Chargement...",
+    "noItems": "Aucun article vendu trouvé…"
+  },
+
   "kds": {
     "kitchenBoard": "Tableau de cuisine",
     "allKitchens": "Toutes les cuisines"

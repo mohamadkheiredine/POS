@@ -6,22 +6,16 @@ import "react-day-picker/dist/style.css";
 import { DayPicker } from "react-day-picker";
 import { useI18n } from "@/hooks/useI18n";
 import { api } from "@/lib/api";
-// import { forceLogout } from "@/lib/logout";
-import { Printer } from "lucide-react";
 import { useAppSelector } from "@/store/hooks";
 
-// ───────────────────────────────
-// Types
-// ───────────────────────────────
-
-type Order = {
-  id: number;
-  code: string;
-  warehouseId: number;
-  warehouseName: string;
-  total: number;
-  currencyCode: string;
-  createdAt: string;
+type SellingItem = {
+  mi_id: number;
+  mi_item_name: string;
+  category_name: string;
+  total_qty: number;
+  total_revenue: number;
+  order_count: number;
+  currency_code: string;
 };
 
 type DateFilter =
@@ -36,9 +30,6 @@ type DateFilter =
 const money = (n: number, code: string) =>
   `${code} ${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-// ───────────────────────────────
-// Page
-// ───────────────────────────────
 
 function DatePopup({
   label,
@@ -52,7 +43,6 @@ function DatePopup({
   const [open, setOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
 
-  // Close when clicking outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
@@ -69,7 +59,7 @@ function DatePopup({
         onClick={() => setOpen(!open)}
         className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm shadow-sm hover:bg-gray-50"
       >
-        {label}: {selected ? selected.toISOString().slice(0, 10) : "Select…"}
+        {label}: {selected ? selected.toISOString().slice(0, 10) : "Select\u2026"}
       </button>
 
       {open && (
@@ -88,14 +78,13 @@ function DatePopup({
   );
 }
 
-export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
-  const [orders, setOrders] = useState<Order[]>([]);
+export default function SellingItemsPage({ lang }: { lang: "en" | "fr" }) {
+  const [items, setItems] = useState<SellingItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
-  const [receiptHTML, setReceiptHTML] = useState<string | null>(null);
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("today");
 
@@ -105,20 +94,11 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
   const [page, setPage] = useState(1);
 
   const auth = useAppSelector((s) => s.auth.loginData);
-
   const g_hash = auth.g_hash;
   const user_id = auth.user_id;
 
-  // useEffect(() => {
-  //   const token = localStorage.getItem("access_token");
-
-  //   if (!token) {
-  //     forceLogout("You are not logged in. Please login.");
-  //   }
-  // }, []);
-
   useEffect(() => {
-    const fetchOrders = async () => {
+    const fetchItems = async () => {
       setLoading(true);
 
       try {
@@ -134,67 +114,69 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
         }
 
         const res = await api.get(
-          process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getlistoforders",
-          { params }
+          process.env.NEXT_PUBLIC_API_LINK + "/api/orders/menuitems",
+          { params },
         );
 
         if (res.data?.is_error === 0) {
-          setOrders(
-            res.data.lst_orders.map((o: any) => ({
-              id: o.fo_id,
-              code: o.fo_order_code,
-              total: o.fo_total_amount,
-              currencyCode: o.currency_code,
-              warehouseId: o.warehouse_id,
-              warehouseName: o.warehouse_name,
-              createdAt: o.fo_order_datetime,
-            }))
+          setItems(
+            (res.data.lst_menu_items || []).map((o: any) => ({
+              mi_id: o.mi_id,
+              mi_item_name: o.mi_item_name,
+              category_name: o.category_name ?? "",
+              total_qty: Number(o.total_qty),
+              total_revenue: Number(o.total_revenue),
+              order_count: Number(o.order_count),
+              currency_code: o.currency_code || "USD",
+            })),
           );
         } else {
-          setOrders([]);
+          setItems([]);
         }
-      } catch (e) {
-        setOrders([]);
+      } catch {
+        setItems([]);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchOrders();
+    fetchItems();
   }, [dateFilter, dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
-    const t = search.trim().toLowerCase();
+    const q = search.trim().toLowerCase();
 
-    return orders.filter((o) => {
-      const code = (o.code ?? "").toString().toLowerCase();
-      const warehouse = (o.warehouseName ?? "").toString().toLowerCase();
+    return items.filter((i) => {
+      const name = (i.mi_item_name ?? "").toLowerCase();
+      const cat = (i.category_name ?? "").toLowerCase();
 
-      return code.includes(t) || warehouse.includes(t);
+      return name.includes(q) || cat.includes(q);
     });
-  }, [orders, search]);
+  }, [items, search]);
 
   const exportExcel = async () => {
     const { utils, writeFile } = await import("xlsx");
     const ws = utils.json_to_sheet(
-      filtered.map((o) => ({
-        Code: o.code,
-        Total: money(o.total, o.currencyCode),
-        Warehouse: o.warehouseName,
-        Created: new Date(o.createdAt).toLocaleString(),
-      }))
+      filtered.map((i) => ({
+        "Item Name": i.mi_item_name,
+        Category: i.category_name,
+        "Qty Sold": i.total_qty,
+        Revenue: money(i.total_revenue, i.currency_code),
+        "Number of Orders": i.order_count,
+      })),
     );
 
     ws["!cols"] = [
-      { wch: 12 }, // Code
-      { wch: 12 }, // Warehouse
-      { wch: 12 }, // Total
-      { wch: 25 }, // Created
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 15 },
+      { wch: 10 },
     ];
 
     const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, "Orders");
-    writeFile(wb, "orders.xlsx");
+    utils.book_append_sheet(wb, ws, "Selling Items");
+    writeFile(wb, "selling_items.xlsx");
   };
 
   const exportPDF = async () => {
@@ -204,83 +186,36 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
     const doc = new jsPDF();
 
     doc.setFontSize(16);
-    doc.text("Orders Report", 14, 15);
+    doc.text("Selling Items Report", 14, 15);
 
-    const tableRows = filtered.map((o) => [
-      o.code,
-      o.warehouseName ?? "",
-      money(o.total, o.currencyCode),
-      new Date(o.createdAt).toLocaleString(),
+    const tableRows = filtered.map((i) => [
+      i.mi_item_name,
+      i.category_name,
+      String(i.total_qty),
+      money(i.total_revenue, i.currency_code),
+      String(i.order_count),
     ]);
 
     autoTable(doc, {
       startY: 25,
-      head: [["Code", "Warehouse", "Total", "Created"]],
+      head: [["Item Name", "Category", "Qty Sold", "Revenue", "Number of Orders"]],
       body: tableRows,
       theme: "grid",
-      headStyles: { fillColor: [243, 114, 44] }, // orange header
+      headStyles: { fillColor: [243, 114, 44] },
       styles: {
         fontSize: 10,
         cellPadding: 2,
       },
       columnStyles: {
-        0: { cellWidth: 30 },
-        1: { cellWidth: 30 },
-        2: { cellWidth: 25 },
-        3: { cellWidth: 70 },
+        0: { cellWidth: 45 },
+        1: { cellWidth: 35 },
+        2: { cellWidth: 20 },
+        3: { cellWidth: 30 },
+        4: { cellWidth: 20 },
       },
     });
 
-    doc.save("orders.pdf");
-  };
-
-  const printOrder = async (order: Order) => {
-    try {
-      const res = await api.get(
-        `${process.env.NEXT_PUBLIC_API_LINK}/api/orders/reprintreceipt`,
-        {
-          params: {
-            user_id,
-            g_hash,
-            order_code: order.code,
-          },
-        }
-      );
-
-      if (res.data?.is_error === 0) {
-        setReceiptHTML(res.data.receipt_html);
-      } else {
-        alert("Failed to load receipt");
-      }
-    } catch {
-      alert("Print failed");
-    }
-  };
-
-  const printReceipt = () => {
-    if (!receiptHTML) return;
-
-    const iframe = document.getElementById("print-iframe") as HTMLIFrameElement;
-    const doc = iframe.contentWindow?.document;
-
-    doc?.open();
-    doc?.write(`
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial; }
-          @page { margin: 0; }
-        </style>
-      </head>
-      <body>${receiptHTML}</body>
-    </html>
-  `);
-    doc?.close();
-
-    setTimeout(() => {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    }, 200);
+    doc.save("selling_items.pdf");
   };
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -301,9 +236,9 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-3xl font-extrabold text-gray-900">
-              {t.orders.orders}
+              {t.sellingItems.title}
             </h1>
-            <p className="text-sm text-gray-600">{t.orders.ordersList}</p>
+            <p className="text-sm text-gray-600">{t.sellingItems.subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -321,7 +256,6 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
           </div>
         </div>
 
-        {/* Filters */}
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-white p-3 shadow-sm">
           {/* Search */}
@@ -348,7 +282,7 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
             }}
             className="rounded-2xl border border-gray-300 bg-white px-4 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
           >
-            <option value="currentdate">Current Shift (Open → Close)</option>
+            <option value="currentdate">Current Shift (Open &rarr; Close)</option>
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>
             <option value="lastweek">Last Week</option>
@@ -378,11 +312,11 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
           <table className="table-auto w-full border-collapse text-sm">
             <thead className="bg-white text-left text-gray-500">
               <tr className="[&>th]:py-3 [&>th]:px-3">
-                <th>{t.orders.code}</th>
-                <th>{t.orders.warehouse}</th>
-                <th>{t.orders.total}</th>
-                <th>{t.orders.created}</th>
-                <th></th>
+                <th>{t.sellingItems.itemName}</th>
+                <th>{t.sellingItems.category}</th>
+                <th>{t.sellingItems.qtySold}</th>
+                <th>{t.sellingItems.revenue}</th>
+                <th>{t.sellingItems.orders}</th>
               </tr>
             </thead>
 
@@ -390,37 +324,30 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
               {loading && (
                 <tr>
                   <td className="py-6 text-center" colSpan={5}>
-                    {t.orders.loading}
+                    {t.sellingItems.loading}
                   </td>
                 </tr>
               )}
 
               {!loading &&
-                paginated.map((o) => (
-                  <tr key={o.id} className="[&>td]:px-3 [&>td]:py-3">
-                    <td className="font-semibold text-gray-900">{o.code}</td>
-                    <td>{o.warehouseName}</td>
-                    <td className="text-left font-semibold">
-                      {money(o.total, o.currencyCode)}
+                paginated.map((i) => (
+                  <tr key={i.mi_id} className="[&>td]:px-3 [&>td]:py-3">
+                    <td className="font-semibold text-gray-900">
+                      {i.mi_item_name}
                     </td>
-                    <td>{new Date(o.createdAt).toLocaleString()}</td>
-
-                    <td className="text-right">
-                      <button
-                        onClick={() => printOrder(o)}
-                        className="inline-flex items-center justify-center rounded-lg p-2 text-gray-600 hover:bg-gray-100 hover:text-amber-600"
-                        title="Print receipt"
-                      >
-                        <Printer className="h-4 w-4" />
-                      </button>
+                    <td>{i.category_name}</td>
+                    <td className="font-semibold">{i.total_qty}</td>
+                    <td className="font-semibold">
+                      {money(i.total_revenue, i.currency_code)}
                     </td>
+                    <td>{i.order_count}</td>
                   </tr>
                 ))}
 
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-12 text-center text-gray-500">
-                    {t.orders.noOrders}
+                    {t.sellingItems.noItems}
                   </td>
                 </tr>
               )}
@@ -454,54 +381,6 @@ export default function OrdersPage({ lang }: { lang: "en" | "fr" }) {
           )}
         </div>
       </div>
-
-      {receiptHTML && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-3xl bg-white shadow-xl overflow-hidden">
-            {/* HEADER */}
-            <div className="flex items-center justify-between border-b px-6 py-3">
-              <h2 className="text-lg font-bold text-gray-900">
-                Receipt Preview
-              </h2>
-              <button
-                onClick={() => setReceiptHTML(null)}
-                className="rounded-lg p-1 hover:bg-gray-100"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* CONTENT */}
-            <div className="p-5 max-h-[70vh] overflow-auto">
-              <div
-                className="receipt-preview"
-                dangerouslySetInnerHTML={{ __html: receiptHTML }}
-              />
-            </div>
-
-            {/* FOOTER */}
-            <div className="border-t px-6 py-3 flex justify-end gap-2">
-              <button
-                onClick={() => setReceiptHTML(null)}
-                className="rounded-xl border px-4 py-2 text-sm"
-              >
-                Close
-              </button>
-
-              <button
-                onClick={printReceipt}
-                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-5 py-2 text-sm font-semibold text-white"
-              >
-                <Printer className="inline h-4 w-4 mr-1" />
-                Print
-              </button>
-            </div>
-          </div>
-
-          {/* hidden iframe */}
-          <iframe id="print-iframe" className="hidden" />
-        </div>
-      )}
     </div>
   );
 }

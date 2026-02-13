@@ -155,6 +155,11 @@ export default function MainLayout({
                 icon: <ClipboardList size={16} />,
               },
               {
+                href: "/menuitems",
+                label: 'Selling Items',
+                icon: <ClipboardList size={16} />,
+              },
+              {
                 href: "/opencash",
                 label: t.menu.open_cash,
                 icon: <ClipboardList size={16} />,
