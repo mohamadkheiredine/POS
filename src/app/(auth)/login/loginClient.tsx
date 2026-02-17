@@ -8,7 +8,8 @@ import LanguageSwitch from "@/components/shared/language-switch";
 import { useI18n } from "@/hooks/useI18n";
 import LoginSwitch from "@/components/shared/loginSwitch";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { setAuth } from "@/store/slices/authSlice";
+import { logout, setAuth } from "@/store/slices/authSlice";
+import { persistor } from "@/store";
 
 export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const [username, setUsername] = useState("");
@@ -22,18 +23,27 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
   const dispatch = useAppDispatch();
   const isLoggedIn = useAppSelector((s) => s.auth.isLoggedIn);
 
-  useEffect(() => {
-    if (isLoggedIn) {
-      router.push("/pos");
-    }
-  }, [isLoggedIn]);
+  const auth = useAppSelector((s) => s.auth.loginData);
 
   useEffect(() => {
-    const user_id = localStorage.getItem("user_id");
-    if (user_id != undefined) {
-      router.push("/pos");
+    if (isLoggedIn && auth.g_hash) {
+      router.replace('/pos');
+    }
+  }, [isLoggedIn, auth.g_hash]);
+
+  useEffect(() => {
+    if (isLoggedIn && !auth.g_hash) {
+      dispatch(logout());
+      persistor.purge();
     }
   }, []);
+
+  // useEffect(() => {
+  //   const user_id = localStorage.getItem("user_id");
+  //   if (user_id != undefined) {
+  //     router.push(getRedirectPath());
+  //   }
+  // }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,8 +112,7 @@ export default function LoginClient({ lang }: { lang: "en" | "fr" }) {
 
       dispatch(setAuth(loginData));
 
-      router.push("/pos");
-  
+      router.push('/pos');
     } catch (error) {
       console.log("Login error", error);
       alert("Login failed. Please check your credentials.");

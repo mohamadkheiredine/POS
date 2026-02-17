@@ -39,6 +39,7 @@ import {
 } from "@/store/slices/ordersSlice";
 import { updateLoginStringField } from "@/store/slices/authSlice";
 import { store } from "@/store";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 
 /* =============================================================================
  * Types
@@ -683,6 +684,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   });
 
   const ordersInfo = useAppSelector((s) => s.orders.orders);
+
+  // Real-time WebSocket sync for orders and tables
+  useRealtimeSync(menu, setTables);
 
   // this useEffect responsable for reload ordersInfo on refresh
   // wait for redux-persist to hydrate
@@ -1406,7 +1410,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     if (!modItem) return;
 
     let orderId = currentOrderId;
-
+    
     if (!orderId) {
       orderId = TEMP_ORDER_PREFIX + uid();
 
@@ -1587,36 +1591,52 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         }),
       );
 
-      // only clear UI for dine-in
       if (!isTakeaway) {
-        // dine-in reset only
-        setOrder({
-          id: uid(),
-          guests: 0,
-          items: [],
-          createdAt: Date.now(),
-          status: "open",
-        });
+        // Dine-in sent to kitchen: restore next unpaid order if any
+        const latestOrders = store.getState().orders.orders;
+        const nextOrder = latestOrders.find(
+          (o) =>
+            !o.isPaid &&
+            !o.isHeld &&
+            Array.isArray(o.items) &&
+            o.items.length > 0,
+        );
+
+        if (nextOrder) {
+          const nextTableId =
+            nextOrder.tableIds?.[0] === 0
+              ? null
+              : nextOrder.tableIds?.[0] ?? null;
+          setCurrentOrderId(nextOrder.orderId);
+          setCurrentTableId(nextTableId);
+          setOrder({
+            id: nextOrder.orderId,
+            guests: 0,
+            items: nextOrder.items,
+            createdAt: Date.now(),
+            status: "open",
+          });
+          applyCustomerToUI(nextOrder.customer ?? null);
+        } else {
+          setCurrentTableId(null);
+          setCurrentOrderId(null);
+          setOrder({
+            id: uid(),
+            guests: 0,
+            items: [],
+            createdAt: Date.now(),
+            status: "open",
+          });
+        }
       } else {
+        // Takeaway: keep showing the same order
         setOrder((prev: any) => ({
           ...prev,
           id: realOrderId,
           items: updatedItems,
         }));
-
         setCurrentTableId(null);
         setCurrentOrderId(realOrderId);
-      }
-      // takeaway stays visible
-
-      if (!isTakeaway) {
-        // dine-in: close ticket ui after sending
-        setCurrentTableId(null);
-        setCurrentOrderId(null);
-      } else {
-        // takeaway: keep showing the same order
-        setCurrentTableId(null); // keep takeaway mode
-        setCurrentOrderId(realOrderId); // keep current order id
       }
 
       alert("Order sent to kitchen");
@@ -1866,20 +1886,43 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     localStorage.removeItem("last_active_order_id");
     localStorage.removeItem("pos_held_order_snapshot");
 
-    //reset ui
-    setCurrentOrderId(null);
-    setCurrentTableId(null);
+    // Restore next unpaid order if any, otherwise reset UI
+    const latestOrders = store.getState().orders.orders;
+    const nextOrder = latestOrders.find(
+      (o) =>
+        !o.isPaid &&
+        !o.isHeld &&
+        Array.isArray(o.items) &&
+        o.items.length > 0,
+    );
 
-    setOrder({
-      id: uid(),
-      guests: 0,
-      items: [],
-      createdAt: Date.now(),
-      status: "open",
-    });
-
-    // clear customer
-    applyCustomerToUI(null);
+    if (nextOrder) {
+      const nextTableId =
+        nextOrder.tableIds?.[0] === 0
+          ? null
+          : nextOrder.tableIds?.[0] ?? null;
+      setCurrentOrderId(nextOrder.orderId);
+      setCurrentTableId(nextTableId);
+      setOrder({
+        id: nextOrder.orderId,
+        guests: 0,
+        items: nextOrder.items,
+        createdAt: Date.now(),
+        status: "open",
+      });
+      applyCustomerToUI(nextOrder.customer ?? null);
+    } else {
+      setCurrentOrderId(null);
+      setCurrentTableId(null);
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+      applyCustomerToUI(null);
+    }
 
     return;
   };
@@ -1919,11 +1962,23 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
 
   useEffect(() => {
     const actives = (ordersInfo || [])
-      .filter((o) => !o?.isHeld && Array.isArray(o?.items))
+      .filter((o) => !o?.isHeld && Array.isArray(o?.items) && o.items.length > 0)
       .flatMap((o) => o.tableIds || []);
 
     setActiveTables(Array.from(new Set(actives)));
   }, [ordersInfo]);
+
+  // Clear local UI when current order was removed from Redux (e.g. paid from another browser)
+  useEffect(() => {
+    if (!currentOrderId) return;
+    const still = ordersInfo.some((o) => o.orderId === currentOrderId);
+    if (!still) {
+      setCurrentTableId(null);
+      setCurrentOrderId(null);
+      setOrder({ id: uid(), guests: 0, items: [], createdAt: Date.now(), status: "open" });
+      localStorage.removeItem("last_active_order_id");
+    }
+  }, [ordersInfo, currentOrderId]);
 
   const startNewOrder = () => {
     setEditingOrderId(null);
@@ -2243,7 +2298,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     localStorage.setItem("last_active_order_id", currentOrderId);
   }, [currentOrderId, hydrating]);
 
-  console.log("Redux Auth:", auth);
 
   useEffect(() => {
     if (ordersLoaded) {
@@ -2377,10 +2431,6 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                         {t.POS.hasOrder}
                       </span>
                     )}
-                  </div>
-
-                  <div className="mt-4 text-xs text-gray-600">
-                    {ta.numberSeats} {t.POS.seats}
                   </div>
                 </button>
               );
@@ -2921,24 +2971,28 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
                               >
                                 <span>{op.name}</span>
 
-                                {!selected ? (
-                                  <button
-                                    onClick={() => toggleModifier(g, op)}
-                                    className="px-2 py-1 text-xs rounded bg-orange-500 text-white"
-                                  >
-                                    Add
-                                  </button>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <div className="text-xs text-gray-500">
-                                      quantity:{" "}
-                                      {Number.isFinite(op.quantity) &&
-                                      op.quantity > 0
-                                        ? op.quantity
-                                        : 1}
-                                    </div>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  {op.priceDelta ? (
+                                    <span className="text-xs font-medium text-gray-600">
+                                      {op.priceDelta > 0 ? "+" : ""}{CurrencySymbol} {money(convertPrice(op.priceDelta))}
+                                    </span>
+                                  ) : null}
+                                  {!selected ? (
+                                    <button
+                                      onClick={() => toggleModifier(g, op)}
+                                      className="px-2 py-1 text-xs rounded bg-orange-500 text-white"
+                                    >
+                                      Add
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => toggleModifier(g, op)}
+                                      className="px-2 py-1 text-xs rounded bg-orange-200 text-orange-700"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}

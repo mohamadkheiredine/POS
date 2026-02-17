@@ -165,6 +165,25 @@ const ordersSlice = createSlice({
     removeOrder(state, action: PayloadAction<string>) {
       state.orders = state.orders.filter((o) => o.orderId !== action.payload);
     },
+
+    // Replace all synced orders (removes paid/deleted orders not in the new list)
+    // Keeps local-only orders that haven't been synced to the server yet
+    replaceAllSyncedOrders(state, action: PayloadAction<LocalOrder[]>) {
+      const synced = action.payload;
+      const syncedIds = new Set(synced.map((o) => o.orderId));
+      // Keep orders not in sync response ONLY if they have local-only state:
+      // - temp orders (tmp-xxx) not yet persisted to server
+      // - orders with unsent items (user is still adding items before send-to-kitchen)
+      const keepLocal = state.orders.filter((o) => {
+        if (syncedIds.has(o.orderId)) return false; // server has it, use server version
+        if (o.orderId.startsWith("tmp-")) return true; // temp order, not on server yet
+        // Keep if any item hasn't been sent to kitchen yet (local changes)
+        const hasUnsent = o.items?.some((item) => !item.sentToKitchen);
+        if (hasUnsent) return true;
+        return false; // not on server + no local changes → was paid/deleted, remove it
+      });
+      state.orders = [...synced, ...keepLocal];
+    },
   },
 });
 
@@ -174,6 +193,7 @@ export const {
   replaceOrderId,
   removeOrder,
   updateOrderItems,
+  replaceAllSyncedOrders,
 } = ordersSlice.actions;
 
 export default ordersSlice.reducer;

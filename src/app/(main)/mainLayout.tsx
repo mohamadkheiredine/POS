@@ -74,6 +74,7 @@ export default function MainLayout({
   const [UsrProfileUrl, setUsrProfileUrl] = useState<string>("");
 
   const auth = useAppSelector((s) => s.auth.loginData);
+  const isLoggedIn = useAppSelector((s) => s.auth.isLoggedIn);
   const user_fullname = auth.user_fullname;
   const user_profile_url = auth.user_profile_url;
 
@@ -87,6 +88,17 @@ export default function MainLayout({
     setOpenSections((p) => ({ ...p, [key]: !p[key] }));
 
   const dispatch = useAppDispatch();
+
+  // Auth guard — single check for the entire layout
+  useEffect(() => {
+    if (!isLoggedIn || !auth.g_hash) {
+      window.location.href = "/login";
+    }
+  }, [isLoggedIn, auth.g_hash]);
+
+  if (!isLoggedIn || !auth.g_hash) {
+    return null;
+  }
 
   return (
     <div className="flex min-h-screen w-full">
@@ -156,7 +168,7 @@ export default function MainLayout({
               },
               {
                 href: "/menuitems",
-                label: 'Selling Items',
+                label: "Selling Items",
                 icon: <ClipboardList size={16} />,
               },
               {
@@ -710,17 +722,16 @@ export default function MainLayout({
 
                   <button
                     className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-gray-50"
-                    onClick={() => {
+                    onClick={async () => {
                       setProfileMenu(false);
-                      // localStorage.clear();
-
-                      //clear redux
+                      localStorage.removeItem("login_redirect");
                       dispatch(logout());
-
-                      //clear redux persist
-                      persistor.purge();
-
-                      router.push("/login");
+                      try {
+                        await persistor.purge();
+                      } catch {
+                        // ignore persist errors during logout
+                      }
+                      window.location.href = "/login";
                     }}
                   >
                     <LogOut size={16} /> Logout

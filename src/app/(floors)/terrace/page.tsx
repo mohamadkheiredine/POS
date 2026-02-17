@@ -7,7 +7,6 @@ import {
   updateOrderItems,
   upsertManyOrders,
   replaceOrderId,
-  LocalOrder,
 } from "@/store/slices/ordersSlice";
 import {
   LayoutGrid,
@@ -34,7 +33,10 @@ import {
 import { updateLoginStringField } from "@/store/slices/authSlice";
 import { api } from "@/lib/api";
 import axios from "axios";
+import Cookies from "js-cookie";
+import { useI18n } from "@/hooks/useI18n";
 import { ModifierGroup } from "@/components/include/POSClient";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 
 type Floor = {
   id: number;
@@ -46,7 +48,7 @@ type Floor = {
 type Table = {
   id: number;
   label: string;
-  numberSeats: number;
+  numberSeats?: number;
   statusId: number;
   floorId: number;
 };
@@ -94,11 +96,6 @@ const money = (n: number, d = 2) =>
     maximumFractionDigits: d,
   });
 
-function normalizeNote(note?: string | null): string {
-  if (!note) return "";
-  return String(note).trim();
-}
-
 function priceFromModifiers(
   groups: ModifierGroup[] | undefined,
   selected: AppliedModifier[],
@@ -119,11 +116,11 @@ function normalizeModifierQty(qty: any, fallback = 1) {
 const TEMP_ORDER_PREFIX = "tmp_";
 const brandBg = "bg-white";
 
-
 export default function POSFloorsPage() {
+  const lang = (Cookies.get("lang") as "en" | "fr") || "en";
+  const { t } = useI18n(lang);
   const dispatch = useAppDispatch();
 
-  /* ------------------ Redux selectors ------------------ */
   const menu = useAppSelector((s) => s.menu.items);
   const ordersInfo = useAppSelector((s) => s.orders.orders);
   const auth = useAppSelector((s) => s.auth.loginData);
@@ -150,7 +147,6 @@ export default function POSFloorsPage() {
     return auth.currency_symbol || "";
   }, [allowedCurrencies, selectedCurrencyId, auth.currency_symbol]);
 
-  /* ------------------ Local state ------------------ */
   const [floors, setFloors] = useState<Floor[]>([]);
   const [selectedFloorId, setSelectedFloorId] = useState<number | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
@@ -186,6 +182,9 @@ export default function POSFloorsPage() {
   });
 
   const [hydrated, setHydrated] = useState(false);
+
+  // Real-time WebSocket sync for orders and tables
+  useRealtimeSync(menu, setTables, { floorId: selectedFloorId });
 
   //allowed curreny
   useEffect(() => {
@@ -305,10 +304,9 @@ export default function POSFloorsPage() {
 
   //categories
   const loadCategories = async () => {
-    const res = await api.get(
-      API_URL + "/api/inventory/listitemcategories",
-      { params: { g_hash, user_id } },
-    );
+    const res = await api.get(API_URL + "/api/inventory/listitemcategories", {
+      params: { g_hash, user_id },
+    });
     if (res.data.is_error === 1) return;
     setCategoriesList(
       res.data.lst_item_categories.map((c: any) => ({
@@ -353,7 +351,7 @@ export default function POSFloorsPage() {
     fetchFloors();
   }, []);
 
-   //tables (fetched when floor changes)
+  //tables (fetched when floor changes)
   useEffect(() => {
     if (!selectedFloorId) return;
 
@@ -370,7 +368,6 @@ export default function POSFloorsPage() {
           data.map((t: any) => ({
             id: t.ft_id,
             label: t.ft_label,
-            numberSeats: t.ft_number_seats,
             statusId: t.ft_status_id ?? 0,
             floorId: t.ft_floor_id,
           })),
@@ -382,61 +379,6 @@ export default function POSFloorsPage() {
 
     fetchTables();
   }, [selectedFloorId]);
-
-  //sync pending orders
-  useEffect(() => {
-    async function loadPendingOrders() {
-      const res = await api.post(API_URL + "/api/orders/sync", {
-        g_hash,
-        user_id,
-        store_id,
-      });
-
-      if (res.data.is_error) return;
-
-      const loadedOrders: LocalOrder[] = res.data.orders.map((o: any) => ({
-        orderId: String(o.order_id),
-        tableIds: o.tables?.length ? o.tables : [0],
-        items: o.items.map((it: any) => {
-          const menuItem = menu.find((m) => m.id === it.item_id);
-          const mods: AppliedModifier[] = (it.modifiers ?? []).map(
-            (m: any) => ({
-              groupId: 1,
-              optionId: Number(m.modifier_id),
-              qty: normalizeModifierQty(m.quantity ?? m.qty ?? 1),
-            }),
-          );
-
-          return {
-            uid: uid(),
-            itemId: it.item_id,
-            name: menuItem?.name ?? "",
-            qty: it.qty,
-            basePrice: Number(it.unit_price),
-            stationId: it.station_id ?? menuItem?.kitchen_station_id ?? 1,
-            note: normalizeNote(it.notes),
-            modifiers: mods,
-            priceExtra: priceFromModifiers(menuItem?.modifierGroups, mods),
-            sentToKitchen: true,
-          };
-        }),
-        customer: {
-          customer_id: o.customer?.customer_id ?? null,
-          name: o.customer?.name ?? "",
-          phone: o.customer?.phone ?? "",
-          address: o.customer?.address ?? "",
-        },
-        checkoutDraft: false,
-        isHeld: false,
-      }));
-
-      dispatch(upsertManyOrders(loadedOrders));
-    }
-
-    if (menu.length > 0) {
-      loadPendingOrders();
-    }
-  }, [menu]);
 
   //hydrate orders on refresh
   useEffect(() => {
@@ -480,9 +422,26 @@ export default function POSFloorsPage() {
 
   const activeTables = useMemo(() => {
     return ordersInfo
-      .filter((o) => o.items && o.items.length > 0)
+      .filter(
+        (o) =>
+          o.items &&
+          o.items.length > 0 &&
+          Array.isArray(o.tableIds) &&
+          o.tableIds[0] !== 0,
+      )
       .flatMap((o) => o.tableIds);
   }, [ordersInfo]);
+
+  // Clear local UI when current order was removed from Redux (e.g. paid from another browser)
+  useEffect(() => {
+    if (!currentOrderId) return;
+    const still = ordersInfo.some((o) => o.orderId === currentOrderId);
+    if (!still) {
+      setCurrentTableId(null);
+      setCurrentOrderId(null);
+      setOrder({ id: uid(), guests: 0, items: [], createdAt: Date.now(), status: "open" });
+    }
+  }, [ordersInfo, currentOrderId]);
 
   const filteredMenu = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -513,7 +472,6 @@ export default function POSFloorsPage() {
   const newItemsCount = useMemo(() => {
     return currentItems.filter((x) => !x.sentToKitchen).length;
   }, [currentItems]);
-
 
   const selectTable = async (table: Table) => {
     // Clicking same table again -> deselect
@@ -601,10 +559,8 @@ export default function POSFloorsPage() {
         console.error("Error creating order:", err);
       });
   };
-
-   //Add Item (with modifier support)
+  //Add Item (with modifier support)
   const addItemStart = async (item: any) => {
-
     const rawModifiers = await fetchModifiersPerItem(item.id);
 
     const modifierGroups: ModifierGroup[] = rawModifiers.length
@@ -643,6 +599,14 @@ export default function POSFloorsPage() {
     setModSelected([]);
   };
 
+  const getActiveOrder = () => {
+    if (!currentTableId) return null;
+
+    return ordersInfo.find(
+      (o) => o.tableIds?.includes(currentTableId) && !o.isHeld,
+    );
+  };
+
   const addItemDirect = (item: any) => {
     if (!currentOrderId) return;
 
@@ -659,7 +623,8 @@ export default function POSFloorsPage() {
       sentToKitchen: false,
     };
 
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+    const orderData = getActiveOrder();
+    if (!orderData) return;
     dispatch(
       updateOrderItems({
         id: currentOrderId,
@@ -712,7 +677,10 @@ export default function POSFloorsPage() {
       sentToKitchen: false,
     };
 
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+    const orderData = ordersInfo.find(
+      (o) =>
+        o.orderId === currentOrderId || o.orderId === String(currentOrderId),
+    );
     dispatch(
       updateOrderItems({
         id: currentOrderId,
@@ -732,13 +700,12 @@ export default function POSFloorsPage() {
   const changeQty = (lineUid: string, delta: number) => {
     if (!currentOrderId) return;
 
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+    const orderData = getActiveOrder();
+    if (!orderData) return;
     if (!orderData) return;
 
     const updatedItems = orderData.items.map((it) =>
-      it.uid === lineUid
-        ? { ...it, qty: Math.max(1, it.qty + delta) }
-        : it,
+      it.uid === lineUid ? { ...it, qty: Math.max(1, it.qty + delta) } : it,
     );
 
     dispatch(updateOrderItems({ id: currentOrderId, items: updatedItems }));
@@ -746,9 +713,7 @@ export default function POSFloorsPage() {
     setOrder((o: any) => ({
       ...o,
       items: o.items.map((it: any) =>
-        it.uid === lineUid
-          ? { ...it, qty: Math.max(1, it.qty + delta) }
-          : it,
+        it.uid === lineUid ? { ...it, qty: Math.max(1, it.qty + delta) } : it,
       ),
     }));
   };
@@ -756,7 +721,8 @@ export default function POSFloorsPage() {
   const removeLine = (lineUid: string) => {
     if (!currentOrderId) return;
 
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+    const orderData = getActiveOrder();
+    if (!orderData) return;
     if (!orderData) return;
 
     const updatedItems = orderData.items.filter((x) => x.uid !== lineUid);
@@ -779,7 +745,7 @@ export default function POSFloorsPage() {
       user_id,
       store_id,
       company_id,
-      order_type: 'dine_in',
+      order_type: "dine_in",
     });
 
     if (res.data?.is_error) {
@@ -800,14 +766,15 @@ export default function POSFloorsPage() {
 
   const sendToKitchen = async () => {
     try {
-      const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+      const orderData = getActiveOrder();
+      if (!orderData) return;
 
-      if (!orderData) return alert("Order not found");
-      if (!g_hash || !user_id) return alert("Missing auth");
+      if (!orderData) return alert(t.terrace.orderNotFound);
+      if (!g_hash || !user_id) return alert(t.terrace.missingAuth);
 
       const newItems = orderData.items.filter((i) => !i.sentToKitchen);
       if (newItems.length === 0) {
-        alert("This order was already sent to kitchen");
+        alert(t.terrace.alreadySent);
         return;
       }
 
@@ -818,10 +785,10 @@ export default function POSFloorsPage() {
         user_id,
         customer_id: 0,
         order_id: Number(realOrderId),
-        order_type: 'dine_in',
-        table_ids: (
-          orderData.tableIds?.length ? orderData.tableIds : [0]
-        ).join(","),
+        order_type: "dine_in",
+        table_ids: (orderData.tableIds?.length ? orderData.tableIds : [0]).join(
+          ",",
+        ),
         sub_total: subtotalOriginal,
         discount: 0,
         total: totalOriginal,
@@ -859,22 +826,21 @@ export default function POSFloorsPage() {
         updateOrderItems({ id: String(realOrderId), items: updatedItems }),
       );
 
-        // Dine-in: reset UI so ACTIVE flag disappears, order stays in Redux
-        setOrder({
-          id: uid(),
-          guests: 0,
-          items: [],
-          createdAt: Date.now(),
-          status: "open",
-        });
-        setCurrentTableId(null);
-        setCurrentOrderId(null);
-      
+      // Dine-in: reset ui so ACTIVE flag disappears, order stays in Redux
+      setOrder({
+        id: uid(),
+        guests: 0,
+        items: [],
+        createdAt: Date.now(),
+        status: "open",
+      });
+      setCurrentTableId(null);
+      setCurrentOrderId(null);
 
-      alert("Order sent to kitchen");
+      alert(t.terrace.orderSent);
     } catch (e: any) {
       console.error(e);
-      alert(e?.message || "Send to kitchen failed");
+      alert(e?.message || t.terrace.sendFailed);
     }
   };
 
@@ -888,12 +854,11 @@ export default function POSFloorsPage() {
 
     setOrder((prev: any) => ({
       ...prev,
-      items: prev.items.map((x: any) =>
-        x.uid === updated.uid ? updated : x,
-      ),
+      items: prev.items.map((x: any) => (x.uid === updated.uid ? updated : x)),
     }));
 
-    const orderData = ordersInfo.find((o) => o.orderId === currentOrderId);
+    const orderData = getActiveOrder();
+    if (!orderData) return;
     dispatch(
       updateOrderItems({
         id: currentOrderId,
@@ -907,12 +872,11 @@ export default function POSFloorsPage() {
   };
 
   const openMenu = () => {
-    if (!currentTableId) return alert("Select a table first.");
+    if (!currentTableId) return alert(t.terrace.selectTableFirst);
     setMenuModalOpen(true);
   };
 
-
-   //station name helper
+  //station name helper
   const stationName = (stationId: number) => {
     const s = kitchenStations.find((ks) => ks.ks_id === stationId);
     return s?.ks_name ?? `Station ${stationId}`;
@@ -926,10 +890,10 @@ export default function POSFloorsPage() {
           {/* Floors bar */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="text-xs text-gray-500">Floor</div>
+              <div className="text-xs text-gray-500">{t.terrace.floor}</div>
               <div className="text-lg font-extrabold text-gray-900 flex items-center gap-2">
                 <LayoutGrid className="h-5 w-5 text-orange-500" />
-                Tables View
+                {t.terrace.tablesView}
               </div>
             </div>
 
@@ -955,9 +919,9 @@ export default function POSFloorsPage() {
 
           {/* Tables grid */}
           <div className="mt-4 grid grid-cols-3 gap-3 md:grid-cols-4 xl:grid-cols-6">
-            {tables.map((t) => {
-              const isCurrent = currentTableId === t.id;
-              const hasOrder = activeTables.includes(t.id);
+            {tables.map((tb) => {
+              const isCurrent = currentTableId === tb.id;
+              const hasOrder = activeTables.includes(tb.id);
 
               const cls = isCurrent
                 ? "border-orange-500 bg-orange-100"
@@ -967,27 +931,23 @@ export default function POSFloorsPage() {
 
               return (
                 <button
-                  key={t.id}
-                  onClick={() => selectTable(t)}
+                  key={tb.id}
+                  onClick={() => selectTable(tb)}
                   className={`h-24 rounded-2xl border ${cls} p-3 text-left transition hover:bg-orange-50`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-extrabold text-gray-900">
-                      {t.label}
+                      {tb.label}
                     </div>
                     {isCurrent ? (
                       <span className="rounded-full bg-orange-200 px-2 py-0.5 text-[10px] font-bold text-orange-800">
-                        ACTIVE
+                        {t.terrace.active}
                       </span>
                     ) : hasOrder ? (
                       <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-800">
-                        HAS ORDER
+                        {t.terrace.hasOrder}
                       </span>
                     ) : null}
-                  </div>
-
-                  <div className="mt-4 text-xs text-gray-600">
-                    {t.numberSeats} seats
                   </div>
                 </button>
               );
@@ -997,16 +957,15 @@ export default function POSFloorsPage() {
           {/* CTA */}
           <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-white p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-gray-700">
-              
-                  Selected table:{" "}
-                  <span className="font-extrabold text-gray-900">
-                    {tables.find((t) => t.id === currentTableId)?.label ??
-                      currentTableId}
-                  </span>
-                  <span className="ml-2 text-xs text-gray-500">
-                    {" "}New items: {newItemsCount}
-                  </span>
-                
+              {t.terrace.selectedTable}{" "}
+              <span className="font-extrabold text-gray-900">
+                {tables.find((tb) => tb.id === currentTableId)?.label ??
+                  currentTableId}
+              </span>
+              <span className="ml-2 text-xs text-gray-500">
+                {" "}
+                {t.terrace.newItems} {newItemsCount}
+              </span>
             </div>
 
             <div className="flex gap-2">
@@ -1015,7 +974,7 @@ export default function POSFloorsPage() {
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-extrabold text-white shadow hover:brightness-105"
               >
                 <ShoppingBag className="h-4 w-4" />
-                Open Menu
+                {t.terrace.openMenu}
               </button>
             </div>
           </div>
@@ -1026,15 +985,17 @@ export default function POSFloorsPage() {
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/60 px-4 py-3">
             <div>
-              <div className="text-xs text-gray-500">Order Preview</div>
+              <div className="text-xs text-gray-500">
+                {t.terrace.orderPreview}
+              </div>
               <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
                 <UtensilsCrossed className="h-4 w-4 text-orange-500" />
-                Table: {
-                      currentTableId
-                        ? (tables.find((t) => t.id === currentTableId)
-                            ?.label ?? currentTableId)
-                        : "\u2014"
-                    }`
+                {t.terrace.table}:{" "}
+                {currentTableId
+                  ? (tables.find((tb) => tb.id === currentTableId)?.label ??
+                    currentTableId)
+                  : "\u2014"}
+                `
               </div>
             </div>
           </div>
@@ -1043,17 +1004,18 @@ export default function POSFloorsPage() {
           <div className="flex-1 overflow-auto p-4">
             {!currentTableId && !currentOrderId ? (
               <div className="grid h-full place-items-center text-sm text-gray-500">
-                Select a table to preview order.
+                {t.terrace.selectTableHint}
               </div>
             ) : currentItems.length === 0 ? (
               <div className="grid h-full place-items-center text-sm text-gray-500">
-                No items yet. Open Menu to add.
+                {t.terrace.noItemsHint}
               </div>
             ) : (
               <ul className="space-y-2">
                 {currentItems.map((li) => {
-                  const lineTotal =
-                    (li.basePrice + (li.priceExtra ?? 0)) * li.qty;
+                  const lineTotal = convertPrice(
+                    (li.basePrice + (li.priceExtra ?? 0)) * li.qty,
+                  );
 
                   return (
                     <li
@@ -1075,11 +1037,11 @@ export default function POSFloorsPage() {
                             {li.sentToKitchen ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
-                                Sent
+                                {t.terrace.sent}
                               </span>
                             ) : (
                               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                                New
+                                {t.terrace.new}
                               </span>
                             )}
                           </div>
@@ -1097,7 +1059,9 @@ export default function POSFloorsPage() {
                                     className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700"
                                   >
                                     {masterMod?.name ?? `#${mod.optionId}`}
-                                    {mod.qty > 1 && ` x${mod.qty}`}
+                                    {masterMod?.price
+                                      ? ` +${CurrencySymbol} ${money(convertPrice(masterMod.price))}`
+                                      : null}
                                   </span>
                                 );
                               })}
@@ -1133,7 +1097,7 @@ export default function POSFloorsPage() {
                               }
                             >
                               <Pencil className="h-3 w-3" />
-                              Edit
+                              {t.terrace.edit}
                             </button>
 
                             <button
@@ -1141,7 +1105,7 @@ export default function POSFloorsPage() {
                               onClick={() => removeLine(li.uid)}
                             >
                               <Trash2 className="h-3 w-3" />
-                              Remove
+                              {t.terrace.remove}
                             </button>
                           </div>
                         </div>
@@ -1151,7 +1115,8 @@ export default function POSFloorsPage() {
                             {CurrencySymbol} {money(lineTotal)}
                           </div>
                           <div className="text-xs text-gray-500">
-                            {CurrencySymbol} {money(li.basePrice)} base
+                            {CurrencySymbol} {money(convertPrice(li.basePrice))}{" "}
+                            {t.terrace.base}
                           </div>
                         </div>
                       </div>
@@ -1165,7 +1130,7 @@ export default function POSFloorsPage() {
           {/* Totals Preview */}
           <div className="border-t border-white/60 p-4">
             <div className="mb-3 flex items-center justify-between text-sm">
-              <span className="text-gray-600">Subtotal</span>
+              <span className="text-gray-600">{t.terrace.subtotal}</span>
               <span className="font-extrabold text-gray-900">
                 {CurrencySymbol} {money(subtotal)}
               </span>
@@ -1180,7 +1145,7 @@ export default function POSFloorsPage() {
               className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-3 text-sm font-extrabold text-white shadow-lg hover:brightness-105 disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
-              Send New Items to Kitchen ({newItemsCount})
+              {t.terrace.sendNewItems} ({newItemsCount})
             </button>
           </div>
         </section>
@@ -1193,15 +1158,14 @@ export default function POSFloorsPage() {
             {/* Header */}
             <div className="flex-shrink-0 flex items-center justify-between border-b px-5 py-3">
               <div>
-                <div className="text-xs text-gray-500">Menu</div>
+                <div className="text-xs text-gray-500">{t.terrace.menu}</div>
                 <div className="text-lg font-extrabold text-gray-900">
-                  Add Items &bull;{" "}
-                    Table ${
-                        currentTableId
-                          ? (tables.find((t) => t.id === currentTableId)
-                              ?.label ?? currentTableId)
-                          : "\u2014"
-                      }`
+                  {t.terrace.addItems} &bull; {t.terrace.table} $
+                  {currentTableId
+                    ? (tables.find((tb) => tb.id === currentTableId)?.label ??
+                      currentTableId)
+                    : "\u2014"}
+                  `
                 </div>
               </div>
 
@@ -1219,7 +1183,7 @@ export default function POSFloorsPage() {
                 {/* LEFT: Categories (scrollable) */}
                 <div className="rounded-2xl border border-gray-200 bg-white p-3 lg:max-h-[calc(90vh-180px)] lg:overflow-auto">
                   <div className="mb-2 text-sm font-extrabold text-gray-900">
-                    Categories
+                    {t.terrace.categories}
                   </div>
 
                   <div className="space-y-2">
@@ -1231,7 +1195,7 @@ export default function POSFloorsPage() {
                           : "bg-white text-gray-800 border-gray-200 hover:bg-orange-50"
                       }`}
                     >
-                      All
+                      {t.terrace.all}
                     </button>
 
                     {categoriesList.map((c) => (
@@ -1258,7 +1222,7 @@ export default function POSFloorsPage() {
                       <input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search items..."
+                        placeholder={t.terrace.searchItems}
                         className="w-full rounded-2xl border border-gray-200 bg-white pl-9 pr-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
                       />
                     </div>
@@ -1282,8 +1246,7 @@ export default function POSFloorsPage() {
 
                         <div className="mt-auto flex items-center justify-between">
                           <span className="text-sm font-extrabold text-gray-900">
-                            {CurrencySymbol || m.currency_code}{" "}
-                            {money(m.price)}
+                            {CurrencySymbol || m.currency_code} {money(convertPrice(m.price))}
                           </span>
                           <span className="text-[11px] font-bold text-gray-500">
                             {stationName(m.kitchen_station_id)}
@@ -1295,7 +1258,7 @@ export default function POSFloorsPage() {
 
                   <div className="mt-4 flex items-center justify-between rounded-2xl bg-orange-50 px-4 py-3">
                     <div className="text-sm font-bold text-orange-800">
-                      Preview Total
+                      {t.terrace.previewTotal}
                     </div>
                     <div className="text-lg font-extrabold text-orange-700">
                       {CurrencySymbol} {money(subtotal)}
@@ -1311,7 +1274,7 @@ export default function POSFloorsPage() {
                 onClick={() => setMenuModalOpen(false)}
                 className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
               >
-                Close
+                {t.terrace.close}
               </button>
               <button
                 onClick={() => {
@@ -1324,7 +1287,7 @@ export default function POSFloorsPage() {
                 className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-extrabold text-white shadow hover:brightness-105 disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />
-                Send to Kitchen
+                {t.terrace.sendToKitchen}
               </button>
             </div>
           </div>
@@ -1337,7 +1300,9 @@ export default function POSFloorsPage() {
           <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b px-5 py-3">
               <div>
-                <div className="text-xs text-gray-500">Customize</div>
+                <div className="text-xs text-gray-500">
+                  {t.terrace.customize}
+                </div>
                 <div className="text-lg font-extrabold text-gray-900">
                   {modItem.name}
                 </div>
@@ -1362,8 +1327,7 @@ export default function POSFloorsPage() {
                   <div className="space-y-1">
                     {group.options.map((opt) => {
                       const selected = modSelected.some(
-                        (s) =>
-                          s.groupId === group.id && s.optionId === opt.id,
+                        (s) => s.groupId === group.id && s.optionId === opt.id,
                       );
                       return (
                         <button
@@ -1383,11 +1347,13 @@ export default function POSFloorsPage() {
                             )}
                             <span className="font-medium">{opt.name}</span>
                           </div>
-                          {opt.quantity > 1 && (
-                            <span className="text-xs text-gray-500">
-                              qty: {opt.quantity}
+                          {opt.priceDelta ? (
+                            <span className="text-xs font-medium text-gray-600">
+                              {opt.priceDelta > 0 ? "+" : ""}
+                              {CurrencySymbol}{" "}
+                              {money(convertPrice(opt.priceDelta))}
                             </span>
-                          )}
+                          ) : null}
                         </button>
                       );
                     })}
@@ -1401,13 +1367,13 @@ export default function POSFloorsPage() {
                 onClick={() => setModItem(null)}
                 className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
               >
-                Cancel
+                {t.terrace.cancel}
               </button>
               <button
                 onClick={confirmAddToOrder}
                 className="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-extrabold text-white shadow hover:brightness-105"
               >
-                Add to Order
+                {t.terrace.addToOrder}
               </button>
             </div>
           </div>
@@ -1420,7 +1386,7 @@ export default function POSFloorsPage() {
           <div className="w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
             <div className="flex-shrink-0 flex items-center justify-between border-b px-5 py-3">
               <div className="text-lg font-extrabold text-gray-900">
-                Edit: {editLine.name}
+                {t.terrace.editItem} {editLine.name}
               </div>
               <button
                 onClick={() => setEditLine(null)}
@@ -1434,7 +1400,7 @@ export default function POSFloorsPage() {
               {/* Quantity Controls */}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-gray-700">
-                  Quantity
+                  {t.terrace.quantity}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -1466,7 +1432,7 @@ export default function POSFloorsPage() {
               {/* Kitchen Station */}
               <div>
                 <label className="mb-1 block text-sm font-bold text-gray-700">
-                  Kitchen Station
+                  {t.terrace.kitchenStation}
                 </label>
                 <select
                   value={editLine.stationId}
@@ -1487,30 +1453,27 @@ export default function POSFloorsPage() {
 
               {/* Modifiers */}
               {(() => {
-                const menuItem = menu.find(
-                  (m) => m.id === editLine.itemId,
-                );
+                const menuItem = menu.find((m) => m.id === editLine.itemId);
                 const groups = menuItem?.modifierGroups ?? [];
                 if (groups.length === 0) return null;
 
                 return (
                   <div>
                     <div className="mb-2 text-sm font-bold text-gray-700">
-                      Modifiers
+                      {t.terrace.modifiers}
                     </div>
                     <div className="space-y-3">
                       {groups.map((g: any) => {
-                        const lineInGroup = (
-                          editLine.modifiers ?? []
-                        ).filter((s: any) => s.groupId === g.id);
+                        const lineInGroup = (editLine.modifiers ?? []).filter(
+                          (s: any) => s.groupId === g.id,
+                        );
 
                         const toggle = (op: ModifierOption) => {
                           setEditLine((l: any) => {
                             if (!l) return l;
                             const exists = l.modifiers.some(
                               (s: any) =>
-                                s.groupId === g.id &&
-                                s.optionId === op.id,
+                                s.groupId === g.id && s.optionId === op.id,
                             );
                             if (exists) {
                               return {
@@ -1518,8 +1481,7 @@ export default function POSFloorsPage() {
                                 modifiers: l.modifiers.filter(
                                   (s: any) =>
                                     !(
-                                      s.groupId === g.id &&
-                                      s.optionId === op.id
+                                      s.groupId === g.id && s.optionId === op.id
                                     ),
                                 ),
                               };
@@ -1531,9 +1493,7 @@ export default function POSFloorsPage() {
                                 {
                                   groupId: g.id,
                                   optionId: op.id,
-                                  qty: normalizeModifierQty(
-                                    op.quantity ?? 1,
-                                  ),
+                                  qty: normalizeModifierQty(op.quantity ?? 1),
                                 },
                               ],
                             };
@@ -1591,7 +1551,7 @@ export default function POSFloorsPage() {
               {/* Note */}
               <div>
                 <label className="mb-1 block text-sm font-bold text-gray-700">
-                  Note
+                  {t.terrace.note}
                 </label>
                 <textarea
                   rows={2}
@@ -1603,32 +1563,34 @@ export default function POSFloorsPage() {
                     }))
                   }
                   className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
-                  placeholder="e.g., Well-done, extra sauce..."
+                  placeholder={t.terrace.notePlaceholder}
                 />
               </div>
 
               {/* Price preview */}
               <div className="flex items-center justify-between rounded-xl bg-orange-50 px-4 py-3">
                 <div className="text-sm">
-                  <div className="text-gray-600">Base</div>
+                  <div className="text-gray-600">{t.terrace.baseCost}</div>
                   <div className="font-bold">
-                    {CurrencySymbol} {money(editLine.basePrice)}
+                    {CurrencySymbol} {money(convertPrice(editLine.basePrice))}
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-bold text-gray-600">
-                    Line Total
+                    {t.terrace.lineTotal}
                   </div>
                   <div className="text-lg font-extrabold text-orange-700">
                     {CurrencySymbol}{" "}
                     {money(
-                      (editLine.basePrice +
-                        priceFromModifiers(
-                          menu.find((m) => m.id === editLine.itemId)
-                            ?.modifierGroups,
-                          editLine.modifiers ?? [],
-                        )) *
-                        editLine.qty,
+                      convertPrice(
+                        (editLine.basePrice +
+                          priceFromModifiers(
+                            menu.find((m) => m.id === editLine.itemId)
+                              ?.modifierGroups,
+                            editLine.modifiers ?? [],
+                          )) *
+                          editLine.qty,
+                      ),
                     )}
                   </div>
                 </div>
@@ -1644,20 +1606,20 @@ export default function POSFloorsPage() {
                 }}
               >
                 <Trash2 className="h-4 w-4" />
-                Remove
+                {t.terrace.remove}
               </button>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setEditLine(null)}
                   className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
                 >
-                  Cancel
+                  {t.terrace.cancel}
                 </button>
                 <button
                   onClick={applyEdit}
                   className="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-extrabold text-white shadow hover:brightness-105"
                 >
-                  Save Changes
+                  {t.terrace.saveChanges}
                 </button>
               </div>
             </div>

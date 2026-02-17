@@ -1,0 +1,606 @@
+openapi: 3.0.3
+info:
+  title: Titan POS FnB - Terrace Page APIs
+  description: All API endpoints consumed by the Terrace (Floors) page.
+  version: 1.0.0
+
+servers:
+  - url: "{apiBaseUrl}"
+    description: Backend API server
+    variables:
+      apiBaseUrl:
+        default: http://localhost
+
+
+components:
+  parameters:
+    g_hash:
+      name: g_hash
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Authentication hash
+    user_id:
+      name: user_id
+      in: query
+      required: true
+      schema:
+        type: integer
+      description: Current user ID
+    store_id:
+      name: store_id
+      in: query
+      required: true
+      schema:
+        type: integer
+      description: Current store ID
+    company_id:
+      name: company_id
+      in: query
+      required: true
+      schema:
+        type: integer
+      description: Current company ID
+
+  schemas:
+    #shared error envelope
+    ErrorResponse:
+      type: object
+      properties:
+        is_error:
+          type: integer
+          enum: [1]
+        error_msg:
+          type: string
+
+    # Allowed Currencies
+    AllowedCurrency:
+      type: object
+      properties:
+        ac_id:
+          type: integer
+          description: Allowed-currency row ID
+        ac_currency_id:
+          type: integer
+        ac_rate_to_original:
+          type: string
+          description: Exchange rate (string-encoded number)
+        cc_currency_code:
+          type: string
+          example: USD
+        cc_currency_name:
+          type: string
+          example: US Dollar
+
+    # Kitchen Station
+    KitchenStation:
+      type: object
+      properties:
+        ks_id:
+          type: integer
+        ks_name:
+          type: string
+          example: Grill
+
+    # Modifier
+    Modifier:
+      type: object
+      properties:
+        m_id:
+          type: integer
+        m_modifier_name:
+          type: string
+        m_price_modifier:
+          type: string
+          description: Price delta (string-encoded number)
+        m_quantity:
+          type: string
+          description: Default quantity (string-encoded number)
+
+    # Menu Item
+    MenuItem:
+      type: object
+      properties:
+        mi_id:
+          type: integer
+        mi_item_name:
+          type: string
+        mi_base_price:
+          type: string
+          description: Base price (string-encoded number)
+        mi_category_id:
+          type: integer
+        category_name:
+          type: string
+        currency_code:
+          type: string
+        cc_id:
+          type: integer
+        mi_kitchen_station_id:
+          type: string
+          description: Station ID (string-encoded number)
+
+    # Item Category
+    ItemCategory:
+      type: object
+      properties:
+        mc_id:
+          type: integer
+        mc_category_name:
+          type: string
+
+    # Floor
+    Floor:
+      type: object
+      properties:
+        fl_id:
+          type: integer
+        fl_floor_name:
+          type: string
+        fl_store_id:
+          type: integer
+        fl_sort_order:
+          type: integer
+
+    # Table
+    Table:
+      type: object
+      properties:
+        ft_id:
+          type: integer
+        ft_label:
+          type: string
+          example: T1
+        ft_number_seats:
+          type: integer
+        ft_status_id:
+          type: integer
+        ft_floor_id:
+          type: integer
+
+    # Synced Order
+    SyncedOrder:
+      type: object
+      properties:
+        order_id:
+          type: integer
+        tables:
+          type: array
+          items:
+            type: integer
+          description: "Table IDs assigned to the order (empty or [0] for takeaway)"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncedOrderItem"
+        customer:
+          type: object
+          nullable: true
+          properties:
+            customer_id:
+              type: integer
+            name:
+              type: string
+            phone:
+              type: string
+            address:
+              type: string
+
+    SyncedOrderItem:
+      type: object
+      properties:
+        item_id:
+          type: integer
+        qty:
+          type: integer
+        unit_price:
+          type: number
+        station_id:
+          type: integer
+        notes:
+          type: string
+        modifiers:
+          type: array
+          items:
+            type: object
+            properties:
+              modifier_id:
+                type: integer
+              quantity:
+                type: integer
+
+    # Modifier per Item
+    ModifierPerItem:
+      type: object
+      properties:
+        im_id:
+          type: integer
+          description: Item-modifier row ID
+        fk_modifier_id:
+          type: integer
+          description: References modifier m_id
+        im_quantity:
+          type: string
+          description: Default quantity (string-encoded number)
+
+    # Order Item payload (sent to updateorder)
+    OrderItemPayload:
+      type: object
+      required: [item_id, quantity, unit_price, station_id]
+      properties:
+        item_id:
+          type: integer
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+        discount:
+          type: number
+          default: 0
+        station_id:
+          type: integer
+        notes:
+          type: string
+        modifiers:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+
+# paths
+paths:
+  # Allowed Currencies
+  /api/allowedcurrencies/getallowedcurrencies:
+    get:
+      summary: Get allowed currencies
+      description: Returns the list of currencies enabled for the current store/company.
+      tags: [Currencies]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+        - $ref: "#/components/parameters/store_id"
+        - $ref: "#/components/parameters/company_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  allowed_currencies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AllowedCurrency"
+
+  #Kitchen Stations
+  /api/orders/getstationsname:
+    get:
+      summary: Get kitchen station names
+      description: Returns all kitchen stations configured for printing/routing.
+      tags: [Kitchen]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_kitchens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KitchenStation"
+
+  # Modifiers (master list)
+  /api/inventory/getlistmodifiers:
+    get:
+      summary: Get all modifiers
+      description: Returns the master list of modifiers (extras, toppings, etc.).
+      tags: [Inventory]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_modifiers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Modifier"
+
+  # Menu Items
+  /api/inventory/getlistofitems:
+    get:
+      summary: Get menu items
+      description: Returns all menu items with prices, categories, and station info.
+      tags: [Inventory]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MenuItem"
+
+  # Item Categories
+  /api/inventory/listitemcategories:
+    get:
+      summary: Get item categories
+      description: Returns all menu categories for filtering items.
+      tags: [Inventory]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_item_categories:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ItemCategory"
+
+  # Floors
+  /api/floors/getlistfloors:
+    get:
+      summary: Get floors
+      description: Returns all floors for the current store, used to group tables.
+      tags: [Floors & Tables]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+        - $ref: "#/components/parameters/store_id"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_floors:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Floor"
+
+  # Tables (per floor)
+  /api/inventory/getlisttables:
+    get:
+      summary: Get tables for a floor
+      description: Returns tables belonging to the specified floor.
+      tags: [Floors & Tables]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+        - name: floor_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Floor ID to fetch tables for
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  lst_tables:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Table"
+
+  # Sync Pending Orders
+  /api/orders/sync:
+    post:
+      summary: Sync pending orders
+      description: Returns all unpaid/open orders for the store so the client can hydrate its local state.
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [g_hash, user_id, store_id]
+              properties:
+                g_hash:
+                  type: string
+                user_id:
+                  type: integer
+                store_id:
+                  type: integer
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  orders:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SyncedOrder"
+
+  # Modifiers per Item
+  /api/inventory/getlistmodifiersperitem:
+    get:
+      summary: Get modifiers for a specific item
+      description: Returns modifiers linked to a specific menu item (called when adding item to order).
+      tags: [Inventory]
+      parameters:
+        - $ref: "#/components/parameters/g_hash"
+        - $ref: "#/components/parameters/user_id"
+        - name: item_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Menu item ID
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModifierPerItem"
+
+  # Create Empty Order
+  /api/orders/createemptyorder:
+    post:
+      summary: Create an empty order
+      description: Creates a new order on the backend and returns its real ID. Called when a table is selected and no existing order is found.
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [g_hash, user_id, store_id, company_id, order_type]
+              properties:
+                g_hash:
+                  type: string
+                user_id:
+                  type: integer
+                store_id:
+                  type: integer
+                company_id:
+                  type: integer
+                order_type:
+                  type: string
+                  enum: [dine_in]
+                  description: Always "dine_in" on the terrace page
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
+                  order_id:
+                    type: integer
+                    description: The newly created order ID
+
+  # Update Order (send to kitchen)
+  /api/orders/updateorder:
+    post:
+      summary: Update order / send items to kitchen
+      description: Sends new (unsent) order items to the kitchen. Called when the user presses "Send to Kitchen".
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - g_hash
+                - user_id
+                - order_id
+                - order_type
+                - table_ids
+                - sub_total
+                - total
+                - order_items
+              properties:
+                g_hash:
+                  type: string
+                user_id:
+                  type: integer
+                customer_id:
+                  type: integer
+                  default: 0
+                order_id:
+                  type: integer
+                  description: Real order ID from createemptyorder
+                order_type:
+                  type: string
+                  enum: [dine_in]
+                  description: Always "dine_in" on the terrace page
+                table_ids:
+                  type: string
+                  description: Comma-separated table IDs (e.g. "5" or "5,6")
+                sub_total:
+                  type: number
+                discount:
+                  type: number
+                  default: 0
+                total:
+                  type: number
+                order_items:
+                  type: string
+                  description: JSON-stringified array of OrderItemPayload objects
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_error:
+                    type: integer
+                    enum: [0]
