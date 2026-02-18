@@ -54,6 +54,9 @@ type MenuItem = {
 type Ingredient = {
   in_id: number | null;
   in_ingredient_name: string;
+  in_ingredient_code: string;
+  in_product_id: number | null;
+  product_name: string;
   in_stock_quantity: number;
   in_unit_of_measure: number | null;
   unit_label: string;
@@ -67,6 +70,11 @@ type Ingredient = {
   _deleted?: boolean;
 };
 
+type RawMaterial = {
+  p_id: number;
+  p_product_name: string;
+};
+
 export default function RecipesPage() {
   const auth = useAppSelector((s) => s.auth.loginData);
   const API = process.env.NEXT_PUBLIC_API_LINK;
@@ -75,6 +83,8 @@ export default function RecipesPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [units, setUnits] = useState<SysUnit[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
+  const [showIngModal, setShowIngModal] = useState(false);
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [q, setQ] = useState("");
@@ -130,7 +140,7 @@ export default function RecipesPage() {
       .finally(() => setLoadingItems(false));
   }, [API, auth.user_id, auth.g_hash, showToast]);
 
-  //fetch units
+  //fetch units + raw materials
   useEffect(() => {
     if (!auth.user_id || !auth.g_hash) return;
     axios
@@ -140,6 +150,15 @@ export default function RecipesPage() {
       .then((res) => {
         if (!res.data.is_error)
           setUnits(Object.values(res.data.lst_units || {}));
+      })
+      .catch(() => {});
+    axios
+      .get(`${API}/api/inventory/getlistrawmaterials`, {
+        params: { user_id: auth.user_id, g_hash: auth.g_hash },
+      })
+      .then((res) => {
+        if (!res.data.is_error)
+          setRawMaterials(Object.values(res.data.raw_materials || {}));
       })
       .catch(() => {});
   }, [API, auth.user_id, auth.g_hash]);
@@ -170,6 +189,9 @@ export default function RecipesPage() {
           ings.map((ing) => ({
             ...ing,
             in_ingredient_name: ing.in_ingredient_name || "",
+            in_ingredient_code: ing.in_ingredient_code || "",
+            in_product_id: ing.in_product_id || null,
+            product_name: ing.product_name || "",
             in_stock_quantity: Number(ing.in_stock_quantity) || 0,
             in_cost_per_unit: Number(ing.in_cost_per_unit) || 0,
             in_waste_percent: Number(ing.in_waste_percent) || 0,
@@ -183,8 +205,6 @@ export default function RecipesPage() {
       .catch(() => showToast("error", "Failed to load ingredients"))
       .finally(() => setLoadingIngredients(false));
   }, [API, activeId, auth.user_id, auth.g_hash, showToast]);
-
-  console.log("active id ", activeId);
 
   //active item
   const active = menuItems.find((m) => m.mi_id === activeId) || null;
@@ -230,25 +250,43 @@ export default function RecipesPage() {
     [ingredients],
   );
 
-  const addLine = () => {
+  const addIngredientFromModal = (data: {
+    in_product_id: number;
+    product_name: string;
+    in_stock_quantity: number;
+    in_unit_of_measure: number;
+    in_ingredient_name: string;
+    in_ingredient_code: string;
+    in_waste_percent: number;
+    in_cost_per_unit: number;
+    in_notes: string;
+  }) => {
+    const unitObj = units.find((u) => u.su_id === data.in_unit_of_measure);
+    const qty = data.in_stock_quantity;
+    const cost = data.in_cost_per_unit;
+    const waste = data.in_waste_percent;
     setIngredients((prev) => [
       ...prev,
       {
         in_id: null,
-        in_ingredient_name: "",
-        in_stock_quantity: 0,
-        in_unit_of_measure: units.length > 0 ? units[0].su_id : null,
-        unit_label: units.length > 0 ? units[0].su_unit_label : "",
-        in_cost_per_unit: 0,
+        in_ingredient_name: data.in_ingredient_name,
+        in_ingredient_code: data.in_ingredient_code,
+        in_product_id: data.in_product_id,
+        product_name: data.product_name,
+        in_stock_quantity: qty,
+        in_unit_of_measure: data.in_unit_of_measure,
+        unit_label: unitObj?.su_unit_label || "",
+        in_cost_per_unit: cost,
         in_currency_id: active?.cc_id || null,
         currency_code: active?.currency_code || "",
-        in_waste_percent: 0,
-        in_line_cost: 0,
-        in_notes: "",
+        in_waste_percent: waste,
+        in_line_cost: qty * cost * (1 + waste),
+        in_notes: data.in_notes,
         _dirty: true,
         _deleted: false,
       },
     ]);
+    setShowIngModal(false);
   };
 
   const updateLine = useCallback((idx: number, patch: Partial<Ingredient>) => {
@@ -342,6 +380,8 @@ export default function RecipesPage() {
           in_id: ing.in_id,
           item_id: activeId,
           in_ingredient_name: ing.in_ingredient_name,
+          in_ingredient_code: ing.in_ingredient_code,
+          in_product_id: ing.in_product_id,
           in_stock_quantity: ing.in_stock_quantity,
           in_unit_of_measure: ing.in_unit_of_measure,
           in_cost_per_unit: ing.in_cost_per_unit,
@@ -365,6 +405,9 @@ export default function RecipesPage() {
             ings.map((ing) => ({
               ...ing,
               in_ingredient_name: ing.in_ingredient_name || "",
+              in_ingredient_code: ing.in_ingredient_code || "",
+              in_product_id: ing.in_product_id || null,
+              product_name: ing.product_name || "",
               in_stock_quantity: Number(ing.in_stock_quantity) || 0,
               in_cost_per_unit: Number(ing.in_cost_per_unit) || 0,
               in_waste_percent: Number(ing.in_waste_percent) || 0,
@@ -618,7 +661,7 @@ export default function RecipesPage() {
                     </h2>
                   </div>
                   <button
-                    onClick={addLine}
+                    onClick={() => setShowIngModal(true)}
                     className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
                   >
                     <Plus className="h-4 w-4" /> Add Ingredient
@@ -833,6 +876,16 @@ export default function RecipesPage() {
           )}
         </main>
       </div>
+
+      {/* Add Ingredient Modal */}
+      {showIngModal && (
+        <IngredientModal
+          rawMaterials={rawMaterials}
+          units={units}
+          onSave={addIngredientFromModal}
+          onClose={() => setShowIngModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -860,12 +913,14 @@ const IngredientRow = React.memo(function IngredientRow({
       className={`[&>td]:py-2 [&>td]:px-2 ${ln._dirty ? "bg-amber-50/40" : ""}`}
     >
       <td>
-        <BufferedInput
-          value={ln.in_ingredient_name}
-          onCommit={(v) => updateLine(idx, { in_ingredient_name: v })}
-          placeholder="Ingredient name"
-          className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5"
-        />
+        <div className="px-2 py-1.5">
+          <div className="font-medium text-gray-900">
+            {ln.in_ingredient_name || "—"}
+          </div>
+          {ln.in_ingredient_code && (
+            <div className="text-xs text-gray-400">{ln.in_ingredient_code}</div>
+          )}
+        </div>
       </td>
       <td>
         <BufferedInput
@@ -943,6 +998,182 @@ const IngredientRow = React.memo(function IngredientRow({
     </tr>
   );
 });
+
+/* ─────────────────────────────────────────
+ * Ingredient Modal — pure refs, no form element, instant typing
+ * ───────────────────────────────────────── */
+function IngredientModal({
+  rawMaterials,
+  units,
+  onSave,
+  onClose,
+}: {
+  rawMaterials: RawMaterial[];
+  units: SysUnit[];
+  onSave: (data: {
+    in_product_id: number;
+    product_name: string;
+    in_stock_quantity: number;
+    in_unit_of_measure: number;
+    in_ingredient_name: string;
+    in_ingredient_code: string;
+    in_waste_percent: number;
+    in_cost_per_unit: number;
+    in_notes: string;
+  }) => void;
+  onClose: () => void;
+}) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const productRef = useRef<HTMLSelectElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const qtyRef = useRef<HTMLInputElement>(null);
+  const unitRef = useRef<HTMLSelectElement>(null);
+  const wasteRef = useRef<HTMLInputElement>(null);
+  const costRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  const submittedRef = useRef(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const handleAdd = () => {
+    if (submittedRef.current) return;
+
+    const ingredientName = nameRef.current?.value.trim() || "";
+    const productId = Number(productRef.current?.value) || 0;
+    const ingredientCode = codeRef.current?.value.trim() || "";
+    const qty = Number(qtyRef.current?.value) || 0;
+    const unitId = Number(unitRef.current?.value) || 0;
+    const waste = wasteRef.current?.value ?? "";
+    const costPerUnit = Number(costRef.current?.value) || 0;
+    const notes = notesRef.current?.value.trim() || "";
+
+    const e: Record<string, string> = {};
+    if (!ingredientName) e.ingredientName = "Ingredient name is required";
+    if (!productId) e.productId = "Product is required";
+    if (qty <= 0) e.qty = "Quantity is required";
+    if (!unitId) e.unitId = "Unit is required";
+    if (waste === "" || Number(waste) < 0) e.waste = "Waste % is required";
+    if (costPerUnit <= 0) e.costPerUnit = "Cost per unit is required";
+
+    if (Object.keys(e).length > 0) {
+      setErrors(e);
+      return;
+    }
+
+    submittedRef.current = true;
+    const product = rawMaterials.find((p) => p.p_id === productId);
+    onSave({
+      in_product_id: productId,
+      product_name: product?.p_product_name || "",
+      in_stock_quantity: qty,
+      in_unit_of_measure: unitId,
+      in_ingredient_name: ingredientName,
+      in_ingredient_code: ingredientCode,
+      in_waste_percent: Number(waste),
+      in_cost_per_unit: costPerUnit,
+      in_notes: notes,
+    });
+  };
+
+  const cls = "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-orange-400 focus:ring-2 focus:ring-orange-100 outline-none";
+  const errCls = "w-full rounded-lg border border-red-400 bg-white px-3 py-2 text-sm focus:border-orange-400 focus:ring-2 focus:ring-orange-100 outline-none";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-4 text-lg font-bold text-gray-900">Add Ingredient</h3>
+
+        <div className="grid gap-3">
+          {/* Ingredient Name (required) */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Ingredient Name *</label>
+            <input ref={nameRef} type="text" defaultValue="" autoFocus className={errors.ingredientName ? errCls : cls} />
+            {errors.ingredientName && <p className="mt-1 text-xs text-red-500">{errors.ingredientName}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Product (raw material link) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Product (Raw Material) *</label>
+              <select ref={productRef} defaultValue={0} className={errors.productId ? errCls : cls}>
+                <option value={0}>-- Select --</option>
+                {rawMaterials.map((p) => (
+                  <option key={p.p_id} value={p.p_id}>{p.p_product_name}</option>
+                ))}
+              </select>
+              {errors.productId && <p className="mt-1 text-xs text-red-500">{errors.productId}</p>}
+            </div>
+
+            {/* Ingredient Code (optional) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Ingredient Code</label>
+              <input ref={codeRef} type="text" defaultValue="" className={cls} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Stock Quantity (required) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Stock Quantity *</label>
+              <input ref={qtyRef} type="number" step="0.01" defaultValue="" className={errors.qty ? errCls : cls} />
+              {errors.qty && <p className="mt-1 text-xs text-red-500">{errors.qty}</p>}
+            </div>
+
+            {/* Unit (required) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Unit *</label>
+              <select ref={unitRef} defaultValue={units.length > 0 ? units[0].su_id : 0} className={errors.unitId ? errCls : cls}>
+                <option value={0}>-- Select --</option>
+                {units.map((u) => (
+                  <option key={u.su_id} value={u.su_id}>{u.su_unit_label}</option>
+                ))}
+              </select>
+              {errors.unitId && <p className="mt-1 text-xs text-red-500">{errors.unitId}</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Waste % (required) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Waste % *</label>
+              <input ref={wasteRef} type="number" step="1" defaultValue="0" className={errors.waste ? errCls : cls} />
+              {errors.waste && <p className="mt-1 text-xs text-red-500">{errors.waste}</p>}
+            </div>
+
+            {/* Cost Per Unit (required) */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-600">Cost Per Unit *</label>
+              <input ref={costRef} type="number" step="0.01" defaultValue="" className={errors.costPerUnit ? errCls : cls} />
+              {errors.costPerUnit && <p className="mt-1 text-xs text-red-500">{errors.costPerUnit}</p>}
+            </div>
+          </div>
+
+          {/* Notes (optional) */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-600">Notes</label>
+            <textarea ref={notesRef} rows={2} defaultValue="" className={cls} />
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleAdd}
+            className="rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white shadow hover:brightness-105"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Mini({
   label,
