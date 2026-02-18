@@ -16,6 +16,13 @@ function normalizeModifierQty(qty: any, fallback = 1) {
  * Connects to the WebSocket channel for the current store and listens
  * for OrderUpdated events. On each event (and once on mount), it syncs
  * orders from the server into Redux. Optionally refreshes tables too.
+ *
+ * When WebSocket is down, falls back to polling every 15 s.
+ * The Redux reducer (replaceAllSyncedOrders) preserves local work:
+ *   - tmp_ orders are never overwritten
+ *   - orders with unsent items keep those items during merge
+ *
+ * Returns a `triggerSync` for pages to call after sendToKitchen / pay.
  */
 export function useRealtimeSync(
   menu: MenuItem[],
@@ -26,7 +33,6 @@ export function useRealtimeSync(
   const auth = useAppSelector((s) => s.auth.loginData);
   const { g_hash, user_id, store_id } = auth;
   const { floorId } = options;
-
 
   const menuRef = useRef(menu);
   menuRef.current = menu;
@@ -163,33 +169,120 @@ export function useRealtimeSync(
     syncTables();
   };
 
-  // ── WebSocket connection (only depends on store_id — very stable) ──
+  // ── Polling helpers ──
+
+  const POLL_INTERVAL_MS = 15_000;
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsConnectedRef = useRef(false);
+  const pausedRef = useRef(false);
+
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current) return;
+    console.log("[RealtimeSync] starting polling fallback every", POLL_INTERVAL_MS / 1000, "s");
+    pollTimerRef.current = setInterval(() => {
+      if (pausedRef.current) {
+        console.log("[RealtimeSync] poll skipped — paused");
+        return;
+      }
+      console.log("[RealtimeSync] poll tick");
+      syncAllRef.current();
+    }, POLL_INTERVAL_MS);
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (!pollTimerRef.current) return;
+    console.log("[RealtimeSync] stopping polling (WebSocket connected)");
+    clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
+  }, []);
+
+  // ── WebSocket connection + polling fallback when WS is down ──
 
   useEffect(() => {
     if (!store_id) {
-      console.log("[RealtimeSync] no store_id yet, skipping WebSocket setup");
+      console.log("[RealtimeSync] no store_id yet, skipping setup");
       return;
     }
 
     const echo = getEcho();
+
+    // No Echo at all → poll only
     if (!echo) {
-      console.log("[RealtimeSync] Echo instance is null");
-      return;
+      console.log("[RealtimeSync] Echo unavailable — polling only");
+      startPolling();
+      return () => { stopPolling(); };
     }
 
-    console.log(`[RealtimeSync] subscribing to channel: store.${store_id}`);
-    const channel = echo.channel(`store.${store_id}`);
+    // Try to monitor Pusher connection state
+    const pusher = (echo.connector as any).pusher as import("pusher-js").default | undefined;
 
+    if (pusher) {
+      const handleStateChange = (states: { previous: string; current: string }) => {
+        console.log(`[RealtimeSync] Pusher state: ${states.previous} → ${states.current}`);
+        if (states.current === "connected") {
+          wsConnectedRef.current = true;
+          stopPolling();
+          syncAllRef.current(); // catch up on reconnect
+        } else if (
+          states.current === "unavailable" ||
+          states.current === "failed" ||
+          states.current === "disconnected"
+        ) {
+          wsConnectedRef.current = false;
+          startPolling();
+        }
+      };
+
+      pusher.connection.bind("state_change", handleStateChange);
+
+      // Check current state
+      const cur = pusher.connection.state;
+      if (cur === "connected") {
+        wsConnectedRef.current = true;
+      } else if (cur === "unavailable" || cur === "failed" || cur === "disconnected") {
+        wsConnectedRef.current = false;
+        startPolling();
+      }
+
+      // Grace period: if still not connected after 5 s, start polling
+      const graceTimer = setTimeout(() => {
+        if (!wsConnectedRef.current) {
+          console.log("[RealtimeSync] WS not connected after 5 s — starting polling");
+          startPolling();
+        }
+      }, 5_000);
+
+      console.log(`[RealtimeSync] subscribing to channel: store.${store_id}`);
+      const channel = echo.channel(`store.${store_id}`);
+      channel.listen(".OrderUpdated", (data: any) => {
+        console.log("[RealtimeSync] OrderUpdated event received!", data);
+        syncAllRef.current();
+      });
+
+      return () => {
+        clearTimeout(graceTimer);
+        stopPolling();
+        pusher.connection.unbind("state_change", handleStateChange);
+        console.log(`[RealtimeSync] leaving channel: store.${store_id}`);
+        echo.leave(`store.${store_id}`);
+      };
+    }
+
+    // Pusher object not accessible — WebSocket + polling as safety net
+    console.log(`[RealtimeSync] subscribing to channel: store.${store_id} (polling as backup)`);
+    const channel = echo.channel(`store.${store_id}`);
     channel.listen(".OrderUpdated", (data: any) => {
       console.log("[RealtimeSync] OrderUpdated event received!", data);
       syncAllRef.current();
     });
+    startPolling();
 
     return () => {
+      stopPolling();
       console.log(`[RealtimeSync] leaving channel: store.${store_id}`);
       echo.leave(`store.${store_id}`);
     };
-  }, [store_id]);
+  }, [store_id, startPolling, stopPolling]);
 
   // ── Initial sync when auth + menu are ready (runs once) ──
 
@@ -203,4 +296,25 @@ export function useRealtimeSync(
     console.log("[RealtimeSync] initial sync starting");
     syncAllRef.current();
   }, [g_hash, user_id, store_id, menu.length, syncOrders]);
+
+  // ── Pause / resume (called by pages) ──
+  // When WS is connected: pause/resume are no-ops for polling (no polling runs).
+  // When WS is down: pause stops poll ticks, resume restarts them.
+  // resumePolling always syncs once so other browsers see the update.
+
+  const pausePolling = useCallback(() => {
+    if (wsConnectedRef.current) return; // WS handles it, no polling to pause
+    console.log("[RealtimeSync] polling PAUSED by page");
+    pausedRef.current = true;
+  }, []);
+
+  const resumePolling = useCallback(() => {
+    if (wsConnectedRef.current) return; // WS handles it, no need to resume
+    console.log("[RealtimeSync] polling RESUMED by page");
+    pausedRef.current = false;
+    // Sync immediately on resume to catch up
+    syncAllRef.current();
+  }, []);
+
+  return { pausePolling, resumePolling };
 }

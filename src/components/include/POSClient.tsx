@@ -686,7 +686,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   const ordersInfo = useAppSelector((s) => s.orders.orders);
 
   // Real-time WebSocket sync for orders and tables
-  useRealtimeSync(menu, setTables);
+  const { pausePolling, resumePolling } = useRealtimeSync(menu, setTables);
 
   // this useEffect responsable for reload ordersInfo on refresh
   // wait for redux-persist to hydrate
@@ -1229,6 +1229,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     const isTakeaway = table.id === 0;
     const orderType = isTakeaway ? "takeaway" : "dine_in";
 
+    // Pause polling while user is building this order
+    pausePolling();
+
     api
       .post(API_URL + "/api/orders/createemptyorder", {
         g_hash,
@@ -1346,6 +1349,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   }, [hydrated, currentOrderId, ordersInfo]);
 
   const addItemStart = async (item: any) => {
+    pausePolling();
     const rawModifiers = await fetchModifiersPerItem(item.id);
 
     const modifierGroups: ModifierGroup[] = rawModifiers.length
@@ -1639,6 +1643,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         setCurrentOrderId(realOrderId);
       }
 
+      // Resume polling + sync immediately so other browsers see the update
+      resumePolling();
+
       alert("Order sent to kitchen");
     } catch (e: any) {
       console.error(e);
@@ -1923,6 +1930,9 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       });
       applyCustomerToUI(null);
     }
+
+    // Resume polling + sync immediately so other browsers see the paid order removed
+    resumePolling();
 
     return;
   };

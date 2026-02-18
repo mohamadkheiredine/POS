@@ -184,7 +184,7 @@ export default function POSFloorsPage() {
   const [hydrated, setHydrated] = useState(false);
 
   // Real-time WebSocket sync for orders and tables
-  useRealtimeSync(menu, setTables, { floorId: selectedFloorId });
+  const { pausePolling, resumePolling } = useRealtimeSync(menu, setTables, { floorId: selectedFloorId });
 
   //allowed curreny
   useEffect(() => {
@@ -534,6 +534,9 @@ export default function POSFloorsPage() {
       }),
     );
 
+    // Pause polling while user is building this order
+    pausePolling();
+
     // Create real order via API
     api
       .post(API_URL + "/api/orders/createemptyorder", {
@@ -561,6 +564,7 @@ export default function POSFloorsPage() {
   };
   //Add Item (with modifier support)
   const addItemStart = async (item: any) => {
+    pausePolling();
     const rawModifiers = await fetchModifiersPerItem(item.id);
 
     const modifierGroups: ModifierGroup[] = rawModifiers.length
@@ -836,6 +840,9 @@ export default function POSFloorsPage() {
       });
       setCurrentTableId(null);
       setCurrentOrderId(null);
+
+      // Resume polling + sync immediately so other browsers see the update
+      resumePolling();
 
       alert(t.terrace.orderSent);
     } catch (e: any) {

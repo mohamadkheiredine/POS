@@ -168,21 +168,41 @@ const ordersSlice = createSlice({
 
     // Replace all synced orders (removes paid/deleted orders not in the new list)
     // Keeps local-only orders that haven't been synced to the server yet
+    // Preserves unsent items when merging with server state
     replaceAllSyncedOrders(state, action: PayloadAction<LocalOrder[]>) {
       const synced = action.payload;
       const syncedIds = new Set(synced.map((o) => o.orderId));
-      // Keep orders not in sync response ONLY if they have local-only state:
-      // - temp orders (tmp-xxx) not yet persisted to server
-      // - orders with unsent items (user is still adding items before send-to-kitchen)
+      const localMap = new Map(state.orders.map((o) => [o.orderId, o]));
+
+      // Merge synced orders: keep server data but preserve any local unsent items
+      const merged = synced.map((serverOrder) => {
+        const local = localMap.get(serverOrder.orderId);
+        if (!local) return serverOrder; // new order from another browser
+
+        const localUnsent = (local.items ?? []).filter((i) => !i.sentToKitchen);
+        if (localUnsent.length === 0) return serverOrder; // no local work, use server
+
+        // Merge: server items (all sent) + local unsent items the user is building
+        return {
+          ...serverOrder,
+          items: [...(serverOrder.items ?? []), ...localUnsent],
+          // Preserve local table assignment & customer if user set them locally
+          tableIds: local.tableIds[0] !== 0 ? local.tableIds : serverOrder.tableIds,
+          customer: local.customer ?? serverOrder.customer,
+          checkoutDraft: local.checkoutDraft || serverOrder.checkoutDraft,
+        };
+      });
+
+      // Keep orders not in sync response if they have local-only state
       const keepLocal = state.orders.filter((o) => {
-        if (syncedIds.has(o.orderId)) return false; // server has it, use server version
-        if (o.orderId.startsWith("tmp-")) return true; // temp order, not on server yet
-        // Keep if any item hasn't been sent to kitchen yet (local changes)
+        if (syncedIds.has(o.orderId)) return false; // already merged above
+        if (o.orderId.startsWith("tmp_")) return true; // temp order, not on server yet
         const hasUnsent = o.items?.some((item) => !item.sentToKitchen);
-        if (hasUnsent) return true;
+        if (hasUnsent) return true; // user is building this order locally
         return false; // not on server + no local changes → was paid/deleted, remove it
       });
-      state.orders = [...synced, ...keepLocal];
+
+      state.orders = [...merged, ...keepLocal];
     },
   },
 });
