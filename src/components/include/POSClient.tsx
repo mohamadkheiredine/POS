@@ -2352,7 +2352,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
     }
   }
 
-  /* -------------------- render -------------------- */
+  console.log("AUTH ", auth);
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-white p-4">
       <iframe id="print-iframe" style={{ display: "none" }} />
