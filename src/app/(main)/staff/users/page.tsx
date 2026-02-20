@@ -523,7 +523,7 @@ export default function UsersPage() {
     };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-gray-50 px-4 py-6">
+    <div className="min-h-[calc(100vh-4rem)] bg-white px-4 py-6">
       <div className="mx-auto w-full max-w-7xl space-y-6">
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -566,7 +566,7 @@ export default function UsersPage() {
             <div className="py-16 text-center text-gray-400">Loading…</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500 border-b border-gray-200">
+              <thead className="bg-white text-left text-gray-500 border-b border-gray-200">
                 <tr className="[&>th]:py-3 [&>th]:px-4 font-medium">
                   <th>User</th>
                   <th>Username</th>

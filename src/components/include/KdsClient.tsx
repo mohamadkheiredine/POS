@@ -72,9 +72,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
   const [stations, setStations] = useState<any[]>([]);
 
   const [statuses, setStatuses] = useState<StatusInfo[]>([]);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [totalPages, setTotalPages] = useState(1);
 
   const { t } = useI18n(lang);
 
@@ -158,9 +155,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           params: {
             g_hash,
             user_id,
-            page,
-            per_page: 50,
-
+            per_page: 200,
             station_id: station === 0 ? undefined : station,
             q: debouncedQuery?.trim() ? debouncedQuery.trim() : undefined,
           },
@@ -210,14 +205,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
         }));
 
         setTickets(mappedTickets);
-
-        const pagination = res.data.pagination;
-        if (pagination) {
-          setHasMore(Number(pagination.page) < Number(pagination.total_pages));
-          setTotalPages(Number(pagination.total_pages));
-        } else {
-          setHasMore(mappedTickets.length > 0);
-        }
       } catch (err: any) {
         if (err?.name === "CanceledError") return;
         console.error("Failed to load pending orders", err);
@@ -230,7 +217,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
       cancelled = true;
       controller.abort();
     };
-  }, [g_hash, user_id, page, station, debouncedQuery]);
+  }, [g_hash, user_id, station, debouncedQuery]);
 
   const columns = useMemo<StatusColumn[]>(() => {
     if (!statuses.length) return [];
@@ -296,6 +283,28 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
       };
     });
   }, [statuses, tickets, debouncedQuery, station]);
+
+  const markTicketDone = async (ticketId: number) => {
+    const ticket = tickets.find((t) => t.id === ticketId);
+    setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+
+    if (!ticket) return;
+    const doneStatusId = statuses[statuses.length - 1]?.id;
+    if (!doneStatusId) return;
+
+    await Promise.all(
+      ticket.items.map((item) =>
+        api
+          .post(`${process.env.NEXT_PUBLIC_API_LINK}/api/orders/updatekitchenstatus`, {
+            g_hash,
+            user_id,
+            oi_id: item.id,
+            oi_kitchen_status: doneStatusId,
+          })
+          .catch(() => {}),
+      ),
+    );
+  };
 
   const toggleHold = (ticketId: number) =>
     setTickets((prev) =>
@@ -371,8 +380,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
 
   useEffect(() => {
     setTickets([]);
-    setPage(1);
-    setHasMore(true);
   }, [station, debouncedQuery]);
 
   const refillCurrentPage = async () => {
@@ -383,8 +390,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
         params: {
           g_hash,
           user_id,
-          page,
-          per_page: 10, // same as backend
+          per_page: 200,
           station_id: station === 0 ? undefined : station,
           q: debouncedQuery?.trim() ? debouncedQuery.trim() : undefined,
         },
@@ -522,6 +528,7 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
                     key={`${t.id}-${col.id}`}
                     t={t}
                     onHold={() => toggleHold(t.id)}
+                    onDone={() => markTicketDone(t.id)}
                     onItemDragStart={(itemId) =>
                       setDragItem({ ticketId: t.id, itemId })
                     }
@@ -536,27 +543,6 @@ export default function KdsClient({ lang }: { lang: "en" | "fr" }) {
           ))}
         </div>
 
-        <div className="mt-4 flex items-center justify-center gap-3">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-xl border bg-white px-3 py-2 text-sm disabled:opacity-40"
-          >
-            ← Prev
-          </button>
-
-          <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm font-semibold">
-            Page {page} / {totalPages}
-          </div>
-
-          <button
-            disabled={!hasMore}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-xl border bg-white px-3 py-2 text-sm disabled:opacity-40"
-          >
-            Next →
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -596,10 +582,12 @@ function EmptyHint({ text }: { text: string }) {
 const TicketCard = memo(function TicketCard({
   t,
   onHold,
+  onDone,
   onItemDragStart,
 }: {
   t: KdsTicket;
   onHold: () => void;
+  onDone: () => void;
   onItemDragStart: (itemId: string) => void;
 }) {
   const itemsInThisColumn = t.items;
@@ -700,7 +688,13 @@ const TicketCard = memo(function TicketCard({
               </span>
             )}
           </button>
-          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          <button
+            onClick={onDone}
+            className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+            title="Mark order as done"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" /> Done
+          </button>
         </div>
       </div>
     </div>

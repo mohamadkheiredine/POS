@@ -110,16 +110,16 @@ export default function MainLayout({
       >
         {/* Brand */}
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             <Image
               src="/images/logo.png"
               alt="TitanPOS"
               width={sidebarOpen ? 120 : 40}
               height={40}
-              className="transition-all"
+              className="shrink-0 transition-all"
             />
             {sidebarOpen && (
-              <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">
+              <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">
                 TitanPOS
               </span>
             )}

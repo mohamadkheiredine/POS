@@ -603,9 +603,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   useEffect(() => {
-    if (modifiers.length > 0) {
-      loadMenu();
-    }
+    loadMenu();
   }, [modifiers]);
 
   // UI state
