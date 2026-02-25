@@ -469,7 +469,7 @@ export default function MainLayout({
       {/* Main */}
       <div className="flex flex-1 flex-col">
         {/* Topbar */}
-        <header className="flex items-center justify-between border-b bg-white px-6 py-3 shadow-sm">
+        <header className="relative z-30 flex items-center justify-between border-b bg-white px-6 py-3 shadow-sm">
           <h1 className="text-xl font-bold text-gray-800">TitanPOS</h1>
 
           <div className="relative flex items-center gap-3">

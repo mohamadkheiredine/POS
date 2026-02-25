@@ -43,6 +43,7 @@ type Lot = {
   uom: UOM;
   expiry?: string; // ISO date
   location: Location;
+  warehouseId: number; // DB warehouse id for this batch
   unitCost: number; // cost per UOM for this lot
   supplier?: string;
   createdAt: string; // received date
@@ -164,6 +165,35 @@ async function apiGetLotsByProductId(
     error_message?: string;
     lots?: ApiLotRow[];
   };
+}
+
+type Warehouse = { id: number; name: string };
+
+async function apiGetWarehouses(g_hash: string | null, user_id: string | null) {
+  const res = await axios.get(
+    process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/getwarehouses",
+    { params: { user_id, g_hash } },
+  );
+  return res.data as {
+    is_error: number;
+    error_message?: string;
+    warehouses?: Warehouse[];
+  };
+}
+
+async function apiTransferStock(payload: {
+  g_hash: string;
+  user_id: string;
+  from_stock_id: number;
+  to_warehouse_id: number;
+  qty: number;
+  notes: string;
+}) {
+  const res = await axios.post(
+    process.env.NEXT_PUBLIC_API_LINK + "/api/inventory/transferstock",
+    payload,
+  );
+  return res.data as { is_error: number; error_message?: string };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -406,6 +436,7 @@ export default function InventoryItemsPage() {
         uom: item.uom,
         expiry: l.expiry_date || undefined,
         location: "Main Store",
+        warehouseId: l.warehouse_id,
         unitCost,
         supplier: l.supplier_id ? `Supplier #${l.supplier_id}` : undefined,
         createdAt: (l.created_at || todayISO()).slice(0, 10),
@@ -425,53 +456,88 @@ export default function InventoryItemsPage() {
     );
   };
 
-  const openTransfer = (item: InventoryItem, lotId?: string) =>
-    setMove({ open: true, item, lotId });
+  const openTransfer = async (item: InventoryItem, lotId?: string) => {
+    // Start with the item as-is; will be replaced if we need to fetch lots
+    let currentItem = item;
+
+    // Lots are lazy-loaded (only fetched when the drawer is opened).
+    // If the user clicks Transfer directly from the table without opening
+    // the drawer first, item.lots is still [] and the dropdown would be empty.
+    // So we fetch them here on demand before opening the modal.
+    if (item.lots.length === 0) {
+      const data = await apiGetLotsByProductId(g_hash, user_id, warehouse_id, Number(item.id));
+
+      if (!data.is_error && data.lots) {
+        // Map API rows to Lot objects (same logic as openLotsDrawer)
+        const mappedLots: Lot[] = (data.lots || []).map((l): Lot => {
+          const qty = Number(l.quantity || 0);
+          const priceItem = Number(l.price_item || 0);
+          const priceStock = Number(l.price_stock || 0);
+          const unitCost = priceItem > 0 ? priceItem : qty > 0 ? priceStock / qty : 0;
+          return {
+            id: String(l.stock_id),
+            code: (l.lot_label && l.lot_label.trim()) || (l.lot_uid && l.lot_uid.trim()) || `LOT-${l.stock_id}`,
+            qty,
+            uom: item.uom,
+            expiry: l.expiry_date || undefined,
+            location: "Main Store",
+            warehouseId: l.warehouse_id,
+            unitCost,
+            supplier: l.supplier_id ? `Supplier #${l.supplier_id}` : undefined,
+            createdAt: (l.created_at || todayISO()).slice(0, 10),
+          };
+        });
+
+        // Build the enriched item to pass to the modal
+        currentItem = {
+          ...item,
+          lots: mappedLots,
+          onHand: mappedLots.reduce((s, l) => s + l.qty, 0),
+        };
+
+        // Also update global items state so the drawer benefits if opened later
+        setItems((arr) => arr.map((it) => (it.id === item.id ? currentItem : it)));
+      }
+    }
+
+    // Open the modal — currentItem now has lots populated (fetched or pre-loaded)
+    setMove({ open: true, item: currentItem, lotId });
+  };
   const openCount = (item: InventoryItem) => setCount({ open: true, item });
 
-  /* ───────────────────────── Demo local mutations (same behavior) ───────────────────────── */
-  const transfer = (
-    itemId: string,
-    lotId: string,
-    to: Location,
-    qty: number,
-  ) => {
+  /* ───────────────────────── Reload lots after a successful transfer ───────────────────────── */
+  const reloadItemLots = async (itemId: string) => {
+    const data = await apiGetLotsByProductId(g_hash, user_id, warehouse_id, Number(itemId));
+    if (data.is_error || !data.lots) return;
+
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+
+    const mappedLots: Lot[] = (data.lots || []).map((l): Lot => {
+      const qty = Number(l.quantity || 0);
+      const priceItem = Number(l.price_item || 0);
+      const priceStock = Number(l.price_stock || 0);
+      const unitCost = priceItem > 0 ? priceItem : qty > 0 ? priceStock / qty : 0;
+      return {
+        id: String(l.stock_id),
+        code: (l.lot_label && l.lot_label.trim()) || (l.lot_uid && l.lot_uid.trim()) || `LOT-${l.stock_id}`,
+        qty,
+        uom: item.uom,
+        expiry: l.expiry_date || undefined,
+        location: "Main Store",
+        warehouseId: l.warehouse_id,
+        unitCost,
+        supplier: l.supplier_id ? `Supplier #${l.supplier_id}` : undefined,
+        createdAt: (l.created_at || todayISO()).slice(0, 10),
+      };
+    });
+
     setItems((arr) =>
-      arr.map((it) => {
-        if (it.id !== itemId) return it;
-
-        const lot = it.lots.find((l) => l.id === lotId);
-        if (!lot || qty <= 0 || qty > lot.qty) return it;
-
-        // decrease source
-        lot.qty = Number((lot.qty - qty).toFixed(3));
-
-        // add/increase destination
-        const existing = it.lots.find(
-          (l) =>
-            l.code === lot.code &&
-            l.location === to &&
-            l.unitCost === lot.unitCost &&
-            l.expiry === lot.expiry,
-        );
-
-        if (existing) existing.qty = Number((existing.qty + qty).toFixed(3));
-        else
-          it.lots.push({
-            id: uid(),
-            code: lot.code,
-            qty,
-            uom: lot.uom,
-            expiry: lot.expiry,
-            location: to,
-            unitCost: lot.unitCost,
-            supplier: lot.supplier,
-            createdAt: lot.createdAt,
-          });
-
-        it.onHand = Number(it.lots.reduce((s, l) => s + l.qty, 0).toFixed(3));
-        return { ...it };
-      }),
+      arr.map((it) =>
+        it.id === itemId
+          ? { ...it, lots: mappedLots, onHand: mappedLots.reduce((s, l) => s + l.qty, 0) }
+          : it,
+      ),
     );
   };
 
@@ -490,6 +556,7 @@ export default function InventoryItemsPage() {
             qty: newTotal,
             uom: it.uom,
             location: "Main Store",
+            warehouseId: 0, // placeholder — cycle count local adjustment
             unitCost: it.avgCost,
             createdAt: todayISO(),
           });
@@ -811,9 +878,11 @@ export default function InventoryItemsPage() {
         <TransferModal
           item={move.item}
           lotId={move.lotId}
+          g_hash={g_hash}
+          user_id={user_id}
           onClose={() => setMove({ open: false })}
-          onTransfer={(lotId, to, qty) => {
-            transfer(move.item!.id, lotId, to, qty);
+          onTransferred={() => {
+            reloadItemLots(move.item!.id);
             setMove({ open: false });
           }}
         />
@@ -957,27 +1026,93 @@ function LotsDrawer({
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Transfer Modal
+ * Transfer Modal — warehouse-to-warehouse via real API
  * ──────────────────────────────────────────────────────────────────────────── */
 function TransferModal({
   item,
   lotId,
+  g_hash,
+  user_id,
   onClose,
-  onTransfer,
+  onTransferred,
 }: {
   item: InventoryItem;
   lotId?: string;
+  g_hash: string | null;
+  user_id: string | null;
   onClose: () => void;
-  onTransfer: (lotId: string, to: Location, qty: number) => void;
+  onTransferred: () => void;
 }) {
-  const [targetLot, setTargetLot] = useState<string>(
+  const [targetLotId, setTargetLotId] = useState<string>(
     lotId || item.lots[0]?.id || "",
   );
-  const [to, setTo] = useState<Location>("Kitchen");
-  const [qty, setQty] = useState<number>(0);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [toWarehouseId, setToWarehouseId] = useState<number | "">("");
+  const [qty, setQty] = useState<number | "">("");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [whLoading, setWhLoading] = useState(true);
 
-  const lot = item.lots.find((l) => l.id === targetLot);
+  const lot = item.lots.find((l) => l.id === targetLotId);
   const maxQty = lot ? lot.qty : 0;
+
+  // Load warehouses on mount, then exclude source warehouse
+  useEffect(() => {
+    setWhLoading(true);
+    apiGetWarehouses(g_hash, user_id)
+      .then((data) => {
+        if (data.is_error || !data.warehouses) {
+          setError(data.error_message || "Failed to load warehouses.");
+          return;
+        }
+        setWarehouses(data.warehouses);
+      })
+      .catch(() => setError("Failed to load warehouses."))
+      .finally(() => setWhLoading(false));
+  }, [g_hash, user_id]);
+
+  // When the source lot changes, reset destination
+  useEffect(() => {
+    setToWarehouseId("");
+  }, [targetLotId]);
+
+  const availableWarehouses = warehouses.filter(
+    (w) => w.id !== (lot?.warehouseId ?? -1),
+  );
+
+  const numQty = Number(qty);
+  const canSubmit =
+    !!targetLotId &&
+    toWarehouseId !== "" &&
+    numQty > 0 &&
+    numQty <= maxQty &&
+    !loading;
+
+  const handleTransfer = async () => {
+    if (!canSubmit || !g_hash || !user_id) return;
+    setError("");
+    setLoading(true);
+    try {
+      const res = await apiTransferStock({
+        g_hash,
+        user_id,
+        from_stock_id: Number(targetLotId),
+        to_warehouse_id: Number(toWarehouseId),
+        qty: numQty,
+        notes,
+      });
+      if (res.is_error) {
+        setError(res.error_message || "Transfer failed.");
+        return;
+      }
+      onTransferred();
+    } catch {
+      setError("Network error. Transfer could not be completed.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
@@ -995,62 +1130,101 @@ function TransferModal({
         </div>
 
         <div className="space-y-3 p-4">
+          {/* From batch */}
           <div>
-            <label className="text-xs text-gray-600">From Lot</label>
+            <label className="text-xs text-gray-600">From Batch</label>
             <select
-              value={targetLot}
-              onChange={(e) => setTargetLot(e.target.value)}
+              value={targetLotId}
+              onChange={(e) => setTargetLotId(e.target.value)}
               className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
             >
               {item.lots.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.code} — {l.qty} {l.uom} @ ${money(l.unitCost)} ·{" "}
-                  {l.location}
+                  {l.code} — {l.qty} {l.uom} @ ${money(l.unitCost)}
                 </option>
               ))}
             </select>
+            {lot && (
+              <p className="mt-1 text-xs text-gray-500">
+                Available: <b>{lot.qty} {lot.uom}</b>
+              </p>
+            )}
           </div>
 
+          {/* To warehouse */}
           <div>
-            <label className="text-xs text-gray-600">To Location</label>
-            <select
-              value={to}
-              onChange={(e) => setTo(e.target.value as Location)}
-              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
-            >
-              {LOCATIONS.map((l) => (
-                <option key={l}>{l}</option>
-              ))}
-            </select>
+            <label className="text-xs text-gray-600">To Warehouse</label>
+            {whLoading ? (
+              <p className="mt-1 text-xs text-gray-500">Loading warehouses…</p>
+            ) : (
+              <select
+                value={toWarehouseId}
+                onChange={(e) =>
+                  setToWarehouseId(e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
+              >
+                <option value="">— Select warehouse —</option>
+                {availableWarehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
+          {/* Quantity */}
           <div>
             <label className="text-xs text-gray-600">Quantity</label>
             <input
               type="number"
+              min={0.001}
+              step="any"
               value={qty}
-              onChange={(e) => setQty(Number(e.target.value) || 0)}
+              onChange={(e) =>
+                setQty(e.target.value === "" ? "" : Number(e.target.value))
+              }
               className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-right"
+              placeholder="0"
             />
-            <div className="mt-1 text-xs text-gray-500">
-              Max {maxQty} {lot?.uom}
-            </div>
+            <p className="mt-1 text-xs text-gray-500">Max: {maxQty} {lot?.uom}</p>
           </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-xs text-gray-600">Notes (optional)</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
+              placeholder="Reason for transfer…"
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
+              {error}
+            </p>
+          )}
 
           <div className="flex items-center justify-end gap-2">
             <button
               onClick={onClose}
-              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm hover:bg-gray-50"
+              disabled={loading}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
             >
               Cancel
             </button>
 
             <button
-              disabled={!targetLot || qty <= 0 || qty > maxQty}
-              onClick={() => onTransfer(targetLot, to, qty)}
+              disabled={!canSubmit}
+              onClick={handleTransfer}
               className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              <MoveRight className="h-4 w-4" /> Transfer
+              <MoveRight className="h-4 w-4" />
+              {loading ? "Transferring…" : "Transfer"}
             </button>
           </div>
         </div>
