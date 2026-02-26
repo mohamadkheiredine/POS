@@ -4,8 +4,7 @@
 import { AssignedModifier, Category, CurrencyOption, KitchenOption, MenuItem, ModifierOption, UnitOption } from "@/app/(main)/menu/items/page";
 import axios from "axios";
 import { BadgeCheck, CheckCircle2, CircleSlash2, Flame, ImageIcon, Salad, Trash2, X } from "lucide-react";
-import React, { useEffect } from "react";
-import { useCallback, useRef, useState } from "react";
+import React, { useEffect, useRef, useCallback, useState } from "react";
 
 type FormState = {
   mi_item_name: string;
@@ -157,6 +156,93 @@ const money = (n: number) =>
     maximumFractionDigits: 2,
   });
 
+/* ── Autocomplete ComboBox ── */
+function ComboBox({
+  value,
+  onChange,
+  options,
+  placeholder = "— Select —",
+  error,
+  disabled,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  options: { value: number; label: string }[];
+  placeholder?: string;
+  error?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? "";
+  const filtered = q.trim()
+    ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase()))
+    : options;
+
+  const handleSelect = (v: number | null) => {
+    onChange(v);
+    setQ("");
+    setOpen(false);
+  };
+
+  const handleBlur = (e: React.FocusEvent) => {
+    if (containerRef.current && !containerRef.current.contains(e.relatedTarget as Node)) {
+      setOpen(false);
+      setQ("");
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { setOpen(false); setQ(""); inputRef.current?.blur(); }
+    if (e.key === "Enter" && filtered.length === 1) { handleSelect(filtered[0].value); e.preventDefault(); }
+  };
+
+  const cls = `mt-1 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-4 ${
+    error
+      ? "border-red-400 focus:ring-red-100"
+      : "border-gray-200 focus:border-orange-400 focus:ring-orange-100"
+  } ${disabled ? "opacity-60 cursor-not-allowed bg-gray-50" : "bg-white"}`;
+
+  return (
+    <div ref={containerRef} className="relative" onBlur={handleBlur}>
+      <input
+        ref={inputRef}
+        value={open ? q : selectedLabel}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => { setQ(""); setOpen(true); }}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+        className={cls}
+      />
+      {open && (
+        <div className="absolute z-50 mt-1 max-h-52 w-full overflow-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">No results</div>
+          ) : (
+            filtered.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(o.value); }}
+                className={`w-full px-3 py-2 text-left text-sm hover:bg-orange-50 ${
+                  value === o.value ? "bg-orange-50 font-semibold text-orange-700" : "text-gray-800"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const ItemDrawer = React.memo(function ItemDrawer({
   item,
   categories,
@@ -223,7 +309,6 @@ export const ItemDrawer = React.memo(function ItemDrawer({
   const [assignedModifiers, setAssignedModifiers] = useState<AssignedModifier[]>([]);
   const [modLoading, setModLoading]   = useState(false);
   const [modSaving, setModSaving]     = useState(false);
-  const [selectedModId, setSelectedModId] = useState<number | null>(null);
 
   const loadModifiers = async () => {
     if (isNew) return;
@@ -276,7 +361,7 @@ export const ItemDrawer = React.memo(function ItemDrawer({
     setModSaving(true);
     try {
       const res = await apiSaveItemModifier(g_hash, user_id, item.id, modId);
-      if (!res.is_error) { setSelectedModId(null); await loadModifiers(); }
+      if (!res.is_error) { await loadModifiers(); }
     } catch {}
     finally { setModSaving(false); }
   };
@@ -406,14 +491,13 @@ export const ItemDrawer = React.memo(function ItemDrawer({
                 <label className="text-xs font-medium text-gray-700">
                   Category <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={form.mi_category_id ?? ""}
-                  onChange={(e) => { set({ mi_category_id: e.target.value ? Number(e.target.value) : null }); clearErr("mi_category_id"); }}
-                  className={inp(errors.mi_category_id)}
-                >
-                  <option value="">— Select —</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <ComboBox
+                  value={form.mi_category_id}
+                  onChange={(v) => { set({ mi_category_id: v }); clearErr("mi_category_id"); }}
+                  options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                  placeholder="— Select category —"
+                  error={errors.mi_category_id}
+                />
                 {errors.mi_category_id && <p className="mt-1 text-xs text-red-500">{errors.mi_category_id}</p>}
               </div>
 
@@ -422,28 +506,25 @@ export const ItemDrawer = React.memo(function ItemDrawer({
                 <label className="text-xs font-medium text-gray-700">
                   Kitchen Station <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={form.mi_kitchen_station_id ?? ""}
-                  onChange={(e) => { set({ mi_kitchen_station_id: e.target.value ? Number(e.target.value) : null }); clearErr("mi_kitchen_station_id"); }}
-                  className={inp(errors.mi_kitchen_station_id)}
-                >
-                  <option value="">— Select —</option>
-                  {kitchens.map((k) => <option key={k.ks_id} value={k.ks_id}>{k.ks_name}</option>)}
-                </select>
+                <ComboBox
+                  value={form.mi_kitchen_station_id}
+                  onChange={(v) => { set({ mi_kitchen_station_id: v }); clearErr("mi_kitchen_station_id"); }}
+                  options={kitchens.map((k) => ({ value: k.ks_id, label: k.ks_name }))}
+                  placeholder="— Select station —"
+                  error={errors.mi_kitchen_station_id}
+                />
                 {errors.mi_kitchen_station_id && <p className="mt-1 text-xs text-red-500">{errors.mi_kitchen_station_id}</p>}
               </div>
 
               {/* Unit */}
               <div>
                 <label className="text-xs text-gray-600">Unit</label>
-                <select
-                  value={form.mi_unit_id ?? ""}
-                  onChange={(e) => set({ mi_unit_id: e.target.value ? Number(e.target.value) : null })}
-                  className={inp()}
-                >
-                  <option value="">— None —</option>
-                  {units.map((u) => <option key={u.su_id} value={u.su_id}>{u.su_unit_label} ({u.su_unit_code})</option>)}
-                </select>
+                <ComboBox
+                  value={form.mi_unit_id}
+                  onChange={(v) => set({ mi_unit_id: v })}
+                  options={units.map((u) => ({ value: u.su_id, label: `${u.su_unit_label} (${u.su_unit_code})` }))}
+                  placeholder="— None —"
+                />
               </div>
 
               {/* Calories */}
@@ -549,16 +630,13 @@ export const ItemDrawer = React.memo(function ItemDrawer({
               <label className="text-xs font-medium text-gray-700">
                 Currency <span className="text-red-500">*</span>
               </label>
-              <select
-                value={form.mi_currency_id ?? ""}
-                onChange={(e) => { set({ mi_currency_id: e.target.value ? Number(e.target.value) : null }); clearErr("mi_currency_id"); }}
-                className={inp(errors.mi_currency_id)}
-              >
-                <option value="">— Select —</option>
-                {currencies.map((c) => (
-                  <option key={c.currency_id} value={c.currency_id}>{c.currency_code} — {c.currency_name}</option>
-                ))}
-              </select>
+              <ComboBox
+                value={form.mi_currency_id}
+                onChange={(v) => { set({ mi_currency_id: v }); clearErr("mi_currency_id"); }}
+                options={currencies.map((c) => ({ value: c.currency_id, label: `${c.currency_code} — ${c.currency_name}` }))}
+                placeholder="— Select currency —"
+                error={errors.mi_currency_id}
+              />
               {errors.mi_currency_id && <p className="mt-1 text-xs text-red-500">{errors.mi_currency_id}</p>}
             </div>
 
@@ -662,32 +740,15 @@ export const ItemDrawer = React.memo(function ItemDrawer({
                     ))}
                   </div>
                   <div className="space-y-1">
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const modId = Number(e.target.value);
-                        setSelectedModId(modId || null);
-                        if (modId) handleAddModifier(modId);
-                      }}
-                      disabled={modSaving}
-                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm disabled:opacity-60"
-                    >
-                      <option value="">— Select modifier to add —</option>
-                      {allModifiers
+                    <ComboBox
+                      value={null}
+                      onChange={(modId) => { if (modId) handleAddModifier(modId); }}
+                      options={allModifiers
                         .filter((m) => !assignedModifiers.some((a) => a.fk_modifier_id === m.m_id))
-                        .map((m) => (
-                          <option key={m.m_id} value={m.m_id}>
-                            {m.m_modifier_name}{m.m_price_modifier > 0 ? ` (+${money(m.m_price_modifier)})` : ""}
-                          </option>
-                        ))}
-                    </select>
-                    {selectedModId && (
-                      <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-700">
-                        Selected: {
-                          allModifiers.find(m => m.m_id === selectedModId)?.m_modifier_name
-                        }
-                      </div>
-                    )}
+                        .map((m) => ({ value: m.m_id, label: m.m_modifier_name + (m.m_price_modifier > 0 ? ` (+${money(m.m_price_modifier)})` : "") }))}
+                      placeholder="— Search modifier to add —"
+                      disabled={modSaving}
+                    />
                     {modSaving && <p className="text-xs text-gray-500">Saving modifier…</p>}
                   </div>
                 </>

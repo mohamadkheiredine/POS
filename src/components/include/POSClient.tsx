@@ -506,8 +506,8 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
   };
 
   useEffect(() => {
-    loadKitchenStations();
-  }, []);
+    if (g_hash && user_id) loadKitchenStations();
+  }, [g_hash, user_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { t } = useI18n(lang);
 
@@ -594,7 +594,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
       currency_code: it.currency_code,
       cc_id: it.cc_id,
       categoryName: it.category_name,
-      kitchen_station_id: Number(it.mi_kitchen_station_id ?? 1),
+      kitchen_station_id: it.mi_kitchen_station_id ? Number(it.mi_kitchen_station_id) : 0,
       modifierGroups: [],
     }));
 
@@ -1290,7 +1290,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
             name: menuItem?.name ?? "",
             qty: it.qty,
             basePrice: Number(it.unit_price),
-            stationId: it.station_id ?? menuItem?.kitchen_station_id ?? 1,
+            stationId: it.station_id ?? menuItem?.kitchen_station_id ?? 0,
             note: normalizeNote(it.notes),
             modifiers: mods,
             priceExtra: priceFromModifiers(menuItem?.modifierGroups, mods),
@@ -1785,7 +1785,7 @@ export default function POSClient({ lang }: { lang: "en" | "fr" }) {
         price: unitBase * displayRate,
 
         discount: 0,
-        // station_id: li.stationId,
+        station_id: li.stationId,
         notes: li.note || "",
 
         modifiers: li.modifiers.map((m: any) => ({
